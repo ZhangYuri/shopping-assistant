@@ -74,4 +74,35 @@ export interface IMCPServer {
     callTool<T = any>(toolName: string, parameters: any): Promise<MCPCallResult<T>>;
     getAvailableTools(): Promise<MCPToolDefinition[]>;
     getServerInfo(): MCPServerInfo;
+
+    // Event emitter methods
+    on(event: string, listener: (...args: any[]) => void): this;
+    emit(event: string, ...args: any[]): boolean;
+}
+
+// MCP Server Registry Events
+export interface MCPServerRegistryEvents {
+    serverRegistered: { serverName: string; server: IMCPServer };
+    serverUnregistered: { serverName: string };
+    serverConnected: { serverName: string; server: IMCPServer };
+    serverDisconnected: { serverName: string; server: IMCPServer };
+    serverStatusChanged: { serverName: string; server: IMCPServer; status: MCPServerStatus; errorMessage?: string };
+    serverUnhealthy: { serverName: string; server: IMCPServer; error?: any };
+    serverConnectionFailed: { serverName: string; server: IMCPServer; error: any };
+    toolCallCompleted: { serverName: string; server: IMCPServer; toolCall: MCPToolCall };
+    toolCallFailed: { serverName: string; server: IMCPServer; toolCall: MCPToolCall };
+    shutdown: void;
+}
+
+// MCP Manager Events
+export interface MCPManagerEvents extends MCPServerRegistryEvents {
+    started: void;
+    stopped: void;
+}
+
+// MCP Server Factory Configuration
+export interface MCPServerFactoryConfig {
+    validateConfigs: boolean;
+    defaultTimeout: number;
+    defaultRetryPolicy: RetryPolicy;
 }
