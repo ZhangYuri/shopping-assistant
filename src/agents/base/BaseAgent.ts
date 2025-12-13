@@ -9,7 +9,7 @@ import { MemorySaver } from '@langchain/langgraph';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { ChatDeepSeek } from '@langchain/deepseek';
 import { DynamicTool } from '@langchain/core/tools';
-import { Logger } from '@/utils/Logger';
+import { Logger } from '../../utils/Logger';
 
 // Simplified agent configuration
 export interface BaseAgentConfig {
