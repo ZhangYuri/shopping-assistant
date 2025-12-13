@@ -13,7 +13,7 @@ export { MCPManager, MCPManagerConfig } from './MCPManager';
 // Concrete server implementations (placeholders for now)
 export { DatabaseMCPServer } from './servers/DatabaseMCPServer';
 export { FileStorageMCPServer } from './servers/FileStorageMCPServer';
-export { CacheMCPServer } from './servers/CacheMCPServer';
+// CacheMCPServer removed - using LangChain built-in caching instead
 export { NotificationMCPServer } from './servers/NotificationMCPServer';
 
 // Re-export types for convenience

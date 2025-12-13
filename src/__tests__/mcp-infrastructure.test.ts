@@ -70,7 +70,7 @@ describe('MCP Infrastructure', () => {
             const types = MCPServerFactory.getSupportedServerTypes();
             expect(types).toContain('database');
             expect(types).toContain('file-storage');
-            expect(types).toContain('cache');
+            // Cache server type removed - using LangChain built-in caching
             expect(types).toContain('notification');
         });
 
@@ -83,8 +83,7 @@ describe('MCP Infrastructure', () => {
             expect(fileCapabilities).toContain('file_upload');
             expect(fileCapabilities).toContain('file_download');
 
-            const cacheCapabilities = MCPServerFactory.getDefaultCapabilities('cache');
-            expect(cacheCapabilities).toContain('cache_operations');
+            // Cache capabilities removed - using LangChain built-in caching
 
             const notificationCapabilities = MCPServerFactory.getDefaultCapabilities('notification');
             expect(notificationCapabilities).toContain('notification_sending');
@@ -186,12 +185,12 @@ describe('MCP Infrastructure', () => {
 
         test('should create default server configurations', () => {
             const configs = MCPManager.createDefaultServerConfigs();
-            expect(configs).toHaveLength(4);
+            expect(configs).toHaveLength(3); // Reduced from 4 to 3 (removed cache server)
 
             const serverTypes = configs.map(c => c.serverType);
             expect(serverTypes).toContain('database');
             expect(serverTypes).toContain('file-storage');
-            expect(serverTypes).toContain('cache');
+            // Cache server type removed - using LangChain built-in caching
             expect(serverTypes).toContain('notification');
         });
 

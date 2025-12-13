@@ -22,66 +22,74 @@ graph TB
         API[REST API]
         Teams[Teams集成]
     end
-    
+
     subgraph "智能体编排层"
         LG[LangGraph工作流引擎]
         Router[智能体路由器]
         Context[上下文管理器]
     end
-    
+
     subgraph "智能体层"
         IA[库存智能体]
         PA[采购智能体]
         FA[财务智能体]
         NA[通知智能体]
     end
-    
+
     subgraph "服务层"
         OCR[图像识别服务]
         NLP[自然语言处理]
         ML[机器学习服务]
         Scheduler[定时任务调度器]
     end
-    
+
     subgraph "MCP服务层"
         MCP_DB[数据库MCP服务器]
         MCP_FILE[文件存储MCP服务器]
-        MCP_CACHE[缓存MCP服务器]
         MCP_NOTIFY[通知MCP服务器]
     end
-    
+
+    subgraph "LangChain内置服务"
+        MEMORY[MemorySaver]
+        STORE[InMemoryStore]
+    end
+
     subgraph "数据层"
         DB[(数据库)]
-        Cache[缓存层]
         Files[文件存储]
     end
-    
+
     UI --> Router
     API --> Router
-    
+
     Router --> LG
     LG --> IA
     LG --> PA
     LG --> FA
     LG --> NA
-    
+
     IA --> OCR
     IA --> NLP
     PA --> ML
     FA --> ML
-    
+
     IA --> MCP_DB
+    IA --> MCP_FILE
     PA --> MCP_DB
+    PA --> MCP_FILE
     FA --> MCP_DB
+    FA --> STORE
     NA --> MCP_NOTIFY
-    
+    NA --> MEMORY
+
+    LG --> MEMORY
+    LG --> STORE
+
     MCP_DB --> DB
     MCP_FILE --> Files
-    MCP_CACHE --> Cache
     MCP_NOTIFY --> Teams
-    
+
     OCR --> Files
-    Cache --> DB
 ```
 
 ### 智能体交互流程
@@ -96,7 +104,7 @@ sequenceDiagram
     participant MCP_DB as 数据库MCP服务器
     participant MCP_NOTIFY as 通知MCP服务器
     participant DB as 数据库
-    
+
     U->>R: "抽纸消耗1包"
     R->>LG: 路由到库存智能体
     LG->>IA: 处理库存更新
@@ -138,7 +146,7 @@ interface InventoryAgent {
   updateInventory(itemId: string, quantity: number): Promise<boolean>
   checkInventoryLevels(): Promise<LowStockAlert[]>
   getInventoryStatus(itemName?: string): Promise<InventoryItem[]>
-  
+
   // MCP集成方法
   private callDatabaseMCP(toolName: string, params: any): Promise<any>
   private callFileStorageMCP(toolName: string, params: any): Promise<any>
@@ -161,7 +169,7 @@ interface ProcurementAgent {
   manageTodoList(action: TodoAction, item: TodoItem): Promise<boolean>
   analyzePurchasePatterns(): Promise<PurchaseAnalysis>
   optimizePurchaseTiming(items: string[]): Promise<TimingRecommendation[]>
-  
+
   // MCP集成方法
   private callDatabaseMCP(toolName: string, params: any): Promise<any>
   private callFileStorageMCP(toolName: string, params: any): Promise<any>
@@ -184,10 +192,13 @@ interface FinanceAgent {
   categorizeExpenses(orderIds: string[]): Promise<CategorizedExpenses>
   trackBudgetStatus(): Promise<BudgetStatus>
   generateQuarterlyAnalysis(): Promise<QuarterlyReport>
-  
+
   // MCP集成方法
   private callDatabaseMCP(toolName: string, params: any): Promise<any>
-  private callCacheMCP(toolName: string, params: any): Promise<any>
+
+  // LangChain内置缓存
+  private cacheAnalysisResult(key: string, result: any): Promise<void>
+  private getCachedResult(key: string): Promise<any | null>
 }
 ```
 
@@ -207,10 +218,13 @@ interface NotificationAgent {
   sendContextualAlert(alert: ContextualAlert): Promise<boolean>
   optimizeNotificationTiming(userId: string, notificationType: string): Promise<OptimalTiming>
   analyzeNotificationEffectiveness(): Promise<NotificationAnalytics>
-  
+
   // MCP集成方法
   private callNotificationMCP(toolName: string, params: any): Promise<any>
-  private callCacheMCP(toolName: string, params: any): Promise<any>
+
+  // LangChain内置状态管理
+  private saveConversationState(conversationId: string, state: any): Promise<void>
+  private loadConversationState(conversationId: string): Promise<any>
 }
 
 // 智能通知相关模型
@@ -270,23 +284,23 @@ interface DatabaseMCPTools {
   updateInventoryQuantity(itemId: string, quantity: number): Promise<boolean>
   addInventoryItem(item: CreateInventoryItem): Promise<string>
   searchInventoryItems(criteria: SearchCriteria): Promise<InventoryItem[]>
-  
+
   // 订单相关操作
   createOrder(order: CreateOrder): Promise<string>
   getOrderHistory(filters: OrderFilters): Promise<Order[]>
   updateOrderStatus(orderId: string, status: string): Promise<boolean>
-  
+
   // 购物清单操作
   getShoppingList(): Promise<ShoppingListItem[]>
   addToShoppingList(item: CreateShoppingListItem): Promise<string>
   updateShoppingListItem(id: string, updates: Partial<ShoppingListItem>): Promise<boolean>
   removeFromShoppingList(id: string): Promise<boolean>
-  
+
   // 财务分析操作
   getSpendingByCategory(dateRange: DateRange): Promise<CategorySpending[]>
   getMonthlyReport(month: string): Promise<MonthlyReport>
   detectAnomalousSpending(threshold: number): Promise<SpendingAnomaly[]>
-  
+
   // 通用查询操作
   executeQuery(sql: string, params: any[]): Promise<QueryResult>
   executeTransaction(operations: DatabaseOperation[]): Promise<TransactionResult>
@@ -313,24 +327,30 @@ interface FileStorageMCPTools {
 }
 ```
 
-#### 缓存MCP服务器
+#### 缓存和状态管理
 
-**职责:**
-- 提供高性能缓存服务
-- 管理会话状态和上下文
-- 实现分布式缓存同步
-- 处理缓存失效策略
+**设计决策：使用 LangChain 内置缓存功能**
 
-**MCP工具接口:**
+基于架构简化和避免重复造轮子的原则，我们将使用 LangChain 的内置缓存和状态管理功能，而不是实现独立的 CacheMCPServer：
+
+**LangChain 内置功能使用：**
 ```typescript
-interface CacheMCPTools {
-  set(key: string, value: any, ttl?: number): Promise<boolean>
-  get(key: string): Promise<any | null>
-  delete(key: string): Promise<boolean>
-  exists(key: string): Promise<boolean>
-  setConversationContext(conversationId: string, context: ConversationContext): Promise<boolean>
-  getConversationContext(conversationId: string): Promise<ConversationContext | null>
-  invalidatePattern(pattern: string): Promise<number>
+// 对话状态管理 - 使用 LangGraph 的内置状态管理
+import { MemorySaver } from "@langchain/langgraph";
+import { InMemoryStore } from "@langchain/core/stores";
+
+// 对话记忆管理
+const memorySaver = new MemorySaver();
+
+// 通用缓存存储
+const cacheStore = new InMemoryStore();
+
+// 智能体状态持久化
+interface AgentStateManager {
+  saveConversationState(conversationId: string, state: any): Promise<void>;
+  loadConversationState(conversationId: string): Promise<any>;
+  cacheAnalysisResult(key: string, result: any, ttl?: number): Promise<void>;
+  getCachedResult(key: string): Promise<any | null>;
 }
 ```
 
@@ -348,23 +368,23 @@ interface NotificationMCPTools {
   // 基础通知发送
   sendNotification(notification: NotificationRequest): Promise<NotificationResult>
   sendBulkNotifications(notifications: NotificationRequest[]): Promise<NotificationResult[]>
-  
+
   // 渠道管理
   configureChannel(channelConfig: NotificationChannelConfig): Promise<boolean>
   getAvailableChannels(): Promise<NotificationChannel[])
   testChannelConnection(channelName: string): Promise<ChannelTestResult>
-  
+
   // 模板管理
   createTemplate(template: NotificationTemplate): Promise<string>
   updateTemplate(templateId: string, template: Partial<NotificationTemplate>): Promise<boolean>
   getTemplate(templateId: string): Promise<NotificationTemplate | null>
   renderTemplate(templateId: string, data: any): Promise<RenderedNotification>
-  
+
   // 订阅和偏好管理
   subscribeUser(userId: string, preferences: NotificationPreferences): Promise<boolean>
   updateUserPreferences(userId: string, preferences: Partial<NotificationPreferences>): Promise<boolean>
   getUserPreferences(userId: string): Promise<NotificationPreferences | null>
-  
+
   // 通知历史和状态
   getNotificationStatus(notificationId: string): Promise<NotificationStatus>
   getNotificationHistory(filters: NotificationHistoryFilters): Promise<NotificationHistoryItem[]>
@@ -469,7 +489,7 @@ interface LangGraphWorkflow {
   getWorkflowStatus(workflowId: string): Promise<WorkflowStatus>
   pauseWorkflow(workflowId: string): Promise<boolean>
   resumeWorkflow(workflowId: string): Promise<boolean>
-  
+
   // MCP集成方法
   registerMCPServer(serverConfig: MCPServerConfig): Promise<boolean>
   callMCPTool(serverName: string, toolName: string, params: any): Promise<any>
@@ -558,7 +578,7 @@ interface ConversationTurn {
 // MCP相关模型
 interface MCPServerConfig {
   serverName: string
-  serverType: 'database' | 'file-storage' | 'cache' | 'notification' | 'custom'
+  serverType: 'database' | 'file-storage' | 'notification' | 'custom'
   connectionString: string
   authConfig?: MCPAuthConfig
   capabilities: string[]
@@ -744,7 +764,7 @@ interface RetryPolicy {
 
 1. **库存智能体错误处理**
    - OCR失败: 请求用户手动输入
-   - MCP数据库服务不可用: 使用缓存MCP临时存储
+   - MCP数据库服务不可用: 使用LangChain InMemoryStore临时存储
    - 无效命令: 提供建议和示例
 
 2. **采购智能体错误处理**
@@ -777,7 +797,7 @@ interface CircuitBreaker {
   failureThreshold: number
   recoveryTimeout: number
   state: 'closed' | 'open' | 'half-open'
-  
+
   call<T>(operation: () => Promise<T>): Promise<T>
   onFailure(error: Error): void
   onSuccess(): void

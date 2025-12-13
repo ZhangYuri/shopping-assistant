@@ -289,11 +289,7 @@ export class MCPManager extends EventEmitter {
                 'file-storage',
                 process.env.FILE_STORAGE_PATH || './storage'
             ),
-            MCPServerFactory.createDefaultConfig(
-                'cache-server',
-                'cache',
-                process.env.REDIS_URL || 'redis://localhost:6379'
-            ),
+            // Cache server removed - using LangChain built-in caching
             MCPServerFactory.createDefaultConfig(
                 'notification-server',
                 'notification',

@@ -9,7 +9,7 @@ import { Logger } from '@/utils/Logger';
 // These will be implemented in subsequent tasks
 import { DatabaseMCPServer } from './servers/DatabaseMCPServer';
 import { FileStorageMCPServer } from './servers/FileStorageMCPServer';
-import { CacheMCPServer } from './servers/CacheMCPServer';
+
 import { NotificationMCPServer } from './servers/NotificationMCPServer';
 
 export class MCPServerFactory {
@@ -34,8 +34,7 @@ export class MCPServerFactory {
             case 'file-storage':
                 return new FileStorageMCPServer(config);
 
-            case 'cache':
-                return new CacheMCPServer(config);
+
 
             case 'notification':
                 return new NotificationMCPServer(config);
@@ -105,9 +104,7 @@ export class MCPServerFactory {
             case 'file-storage':
                 this.validateFileStorageConfig(config, errors);
                 break;
-            case 'cache':
-                this.validateCacheConfig(config, errors);
-                break;
+
             case 'notification':
                 this.validateNotificationConfig(config, errors);
                 break;
@@ -148,7 +145,7 @@ export class MCPServerFactory {
      * Get supported server types
      */
     static getSupportedServerTypes(): MCPServerType[] {
-        return ['database', 'file-storage', 'cache', 'notification'];
+        return ['database', 'file-storage', 'notification'];
     }
 
     /**
@@ -176,13 +173,7 @@ export class MCPServerFactory {
                     'file_metadata',
                 ];
 
-            case 'cache':
-                return [
-                    'cache_operations',
-                    'conversation_context',
-                    'session_management',
-                    'cache_invalidation',
-                ];
+
 
             case 'notification':
                 return [
@@ -227,17 +218,7 @@ export class MCPServerFactory {
         }
     }
 
-    private static validateCacheConfig(config: MCPServerConfig, errors: string[]): void {
-        // Cache-specific validation
-        const requiredCapabilities = ['cache_operations'];
-        const missingCapabilities = requiredCapabilities.filter(
-            cap => !config.capabilities.includes(cap)
-        );
 
-        if (missingCapabilities.length > 0) {
-            errors.push(`Cache server missing required capabilities: ${missingCapabilities.join(', ')}`);
-        }
-    }
 
     private static validateNotificationConfig(config: MCPServerConfig, errors: string[]): void {
         // Notification-specific validation

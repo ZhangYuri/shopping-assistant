@@ -4,7 +4,7 @@
 
 import { BaseEntity, ErrorInfo, RetryPolicy } from './common.types';
 
-export type MCPServerType = 'database' | 'file-storage' | 'cache' | 'notification' | 'custom';
+export type MCPServerType = 'database' | 'file-storage' | 'notification' | 'custom';
 
 export type MCPServerStatus = 'connected' | 'disconnected' | 'error' | 'initializing';
 
