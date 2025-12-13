@@ -72,7 +72,8 @@ export interface AgentMetrics {
     errorRate: number;
 }
 
-// Base agent interface that all agents must implement
+// Legacy interface - kept for compatibility but deprecated
+// New agents should extend BaseAgent directly
 export interface IAgent {
     readonly config: AgentConfig;
     readonly state: AgentState;

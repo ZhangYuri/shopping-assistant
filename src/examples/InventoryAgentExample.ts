@@ -1,211 +1,126 @@
 /**
- * Inventory Agent Usage Example
+ * Example usage of the new InventoryAgent with LangChain integration
  */
 
 import { InventoryAgent } from '@/agents/InventoryAgent';
-import { MCPManager } from '@/mcp/MCPManager';
-import { AgentConfig } from '@/types/agent.types';
+import { ChatDeepSeek } from '@langchain/deepseek';
 
-// Example usage of the Inventory Agent
-export class InventoryAgentExample {
-    private inventoryAgent: InventoryAgent;
-    private mcpManager: MCPManager;
+async function demonstrateInventoryAgent() {
+    // Create tools for the inventory agent
+    const { databaseTools, fileStorageTools, notificationTools } = InventoryAgent.createInventoryTools();
 
-    constructor() {
-        // Initialize MCP Manager
-        this.mcpManager = new MCPManager({
-            registry: {
-                healthCheckInterval: 30000,
-                maxConcurrentCalls: 10,
-                defaultTimeout: 5000,
-            },
-            autoStart: true,
-            configValidation: true,
-        });
+    // Initialize the inventory agent
+    const inventoryAgent = new InventoryAgent({
+        agentId: 'inventory-001',
+        name: 'HomeInventoryAgent',
+        description: '家庭库存管理智能体',
+        databaseTools,
+        fileStorageTools,
+        notificationTools,
+        defaultThresholds: {
+            '日用品': 2,
+            '食品': 3,
+            '清洁用品': 1,
+            '个人护理': 2,
+        },
+        model: new ChatDeepSeek({
+            apiKey: process.env.DEEPSEEK_API_KEY,
+            model: 'deepseek-chat',
+            temperature: 0.1,
+        }),
+    });
 
-        // Configure Inventory Agent
-        const agentConfig: AgentConfig = {
-            agentId: 'inventory-agent',
-            agentType: 'inventory',
-            name: 'Household Inventory Agent',
-            description: 'Manages household inventory through natural language and photo processing',
-            capabilities: [
-                'natural_language_inventory',
-                'photo_inventory_add',
-                'inventory_monitoring',
-            ],
-            retryPolicy: {
-                maxRetries: 3,
-                backoffStrategy: 'exponential',
-                baseDelay: 1000,
-                maxDelay: 5000,
-            },
-            maxConcurrentTasks: 5,
-            timeoutMs: 30000,
-        };
+    // Initialize the agent
+    await inventoryAgent.initialize();
 
-        this.inventoryAgent = new InventoryAgent(agentConfig, this.mcpManager);
-    }
+    console.log('=== 库存智能体演示 ===\n');
 
-    async initialize(): Promise<void> {
-        console.log('Initializing Inventory Agent Example...');
+    // Example 1: Natural language inventory command
+    console.log('1. 自然语言库存命令:');
+    const result1 = await inventoryAgent.processInventoryCommand('抽纸消耗1包');
+    console.log('用户输入: "抽纸消耗1包"');
+    console.log('智能体回复:', result1.messages[result1.messages.length - 1]?.content);
+    console.log('');
 
-        // Start MCP Manager
-        await this.mcpManager.start();
+    // Example 2: Add inventory items
+    console.log('2. 添加库存物品:');
+    const result2 = await inventoryAgent.processInventoryCommand('添加牛奶3瓶');
+    console.log('用户输入: "添加牛奶3瓶"');
+    console.log('智能体回复:', result2.messages[result2.messages.length - 1]?.content);
+    console.log('');
 
-        // Register MCP servers
-        const serverConfigs = MCPManager.createDefaultServerConfigs();
-        await this.mcpManager.registerServersFromConfigs(serverConfigs);
+    // Example 3: Query inventory status
+    console.log('3. 查询库存状态:');
+    const result3 = await inventoryAgent.processInventoryCommand('查询抽纸还有多少');
+    console.log('用户输入: "查询抽纸还有多少"');
+    console.log('智能体回复:', result3.messages[result3.messages.length - 1]?.content);
+    console.log('');
 
-        // Initialize and start the inventory agent
-        await this.inventoryAgent.initialize();
-        await this.inventoryAgent.start();
+    // Example 4: Photo upload processing
+    console.log('4. 照片上传处理:');
+    const result4 = await inventoryAgent.processPhotoUpload('photo-123', '这是一包新买的抽纸');
+    console.log('用户操作: 上传照片并描述 "这是一包新买的抽纸"');
+    console.log('智能体回复:', result4.messages[result4.messages.length - 1]?.content);
+    console.log('');
 
-        console.log('Inventory Agent Example initialized successfully!');
-    }
+    // Example 5: Check inventory levels
+    console.log('5. 检查库存水平:');
+    const result5 = await inventoryAgent.checkInventoryLevels();
+    console.log('系统操作: 检查所有物品的库存水平');
+    console.log('智能体回复:', result5.messages[result5.messages.length - 1]?.content);
+    console.log('');
 
-    async demonstrateNaturalLanguageCommands(): Promise<void> {
-        console.log('\n=== Natural Language Command Examples ===');
+    // Example 6: Generate inventory report
+    console.log('6. 生成库存报告:');
+    const result6 = await inventoryAgent.getInventoryReport();
+    console.log('用户请求: 生成完整库存报告');
+    console.log('智能体回复:', result6.messages[result6.messages.length - 1]?.content);
+    console.log('');
 
-        const commands = [
-            '抽纸消耗1包',
-            '添加牛奶2瓶',
-            '查询抽纸库存',
-            '洗发水设置为3瓶',
-        ];
+    // Example 7: Streaming response
+    console.log('7. 流式响应演示:');
+    console.log('用户输入: "请详细分析当前库存状况并给出建议"');
+    console.log('智能体流式回复:');
 
-        for (const command of commands) {
-            console.log(`\nProcessing: "${command}"`);
-            try {
-                const result = await this.inventoryAgent.processNaturalLanguageCommand(command);
-                console.log(`Result: ${result.message}`);
-                if (result.item) {
-                    console.log(`Item: ${result.item.item_name}, Quantity: ${result.item.current_quantity} ${result.item.unit}`);
-                }
-            } catch (error) {
-                console.error(`Error: ${error}`);
+    const stream = await inventoryAgent.stream('请详细分析当前库存状况并给出建议');
+    for await (const chunk of stream) {
+        if (chunk.messages && chunk.messages.length > 0) {
+            const lastMessage = chunk.messages[chunk.messages.length - 1];
+            if (lastMessage.content) {
+                process.stdout.write(lastMessage.content);
             }
         }
     }
+    console.log('\n');
 
-    async demonstratePhotoProcessing(): Promise<void> {
-        console.log('\n=== Photo Processing Example ===');
+    // Display agent metrics
+    console.log('=== 智能体性能指标 ===');
+    const metrics = inventoryAgent.getMetrics();
+    console.log(`任务完成数: ${metrics.tasksCompleted}`);
+    console.log(`任务失败数: ${metrics.tasksFailedCount}`);
+    console.log(`平均响应时间: ${metrics.averageResponseTime}ms`);
+    console.log(`错误率: ${(metrics.errorRate * 100).toFixed(2)}%`);
+    console.log(`最后活动时间: ${metrics.lastActiveTime.toLocaleString()}`);
+    console.log('');
 
-        // This would normally be a real file ID from uploaded photo
-        const mockPhotoFileId = 'example-photo-123';
-        const description = '维他奶豆奶';
-
-        console.log(`Processing photo: ${mockPhotoFileId} with description: "${description}"`);
-
-        try {
-            const result = await this.inventoryAgent.processPhotoUpload(mockPhotoFileId, description);
-            console.log(`Result: ${result.message}`);
-            if (result.item) {
-                console.log(`Added item: ${result.item.item_name}, Quantity: ${result.item.current_quantity} ${result.item.unit}`);
-            }
-        } catch (error) {
-            console.error(`Error: ${error}`);
-        }
-    }
-
-    async demonstrateInventoryMonitoring(): Promise<void> {
-        console.log('\n=== Inventory Monitoring Example ===');
-
-        try {
-            // Check inventory levels
-            console.log('Checking inventory levels...');
-            const alerts = await this.inventoryAgent.checkInventoryLevels();
-
-            if (alerts.length > 0) {
-                console.log(`Found ${alerts.length} low stock alerts:`);
-                for (const alert of alerts) {
-                    console.log(`- ${alert.item.item_name}: ${alert.item.current_quantity} ${alert.item.unit} (${alert.recommendedAction})`);
-                }
-            } else {
-                console.log('No low stock alerts found.');
-            }
-
-            // Get inventory health report
-            console.log('\nGenerating inventory health report...');
-            const report = await this.inventoryAgent.getInventoryHealthReport();
-
-            console.log(`Total items: ${report.totalItems}`);
-            console.log(`Low stock items: ${report.lowStockItems}`);
-            console.log('Category breakdown:');
-            for (const [category, count] of Object.entries(report.categoryBreakdown)) {
-                console.log(`  ${category}: ${count} items`);
-            }
-            console.log('Recommendations:');
-            for (const recommendation of report.recommendations) {
-                console.log(`  - ${recommendation}`);
-            }
-
-        } catch (error) {
-            console.error(`Error: ${error}`);
-        }
-    }
-
-    async demonstrateInventoryQueries(): Promise<void> {
-        console.log('\n=== Inventory Query Examples ===');
-
-        try {
-            // Get all inventory items
-            console.log('Getting all inventory items...');
-            const allItems = await this.inventoryAgent.getInventoryStatus();
-            console.log(`Found ${allItems.length} items in inventory:`);
-
-            for (const item of allItems.slice(0, 5)) { // Show first 5 items
-                console.log(`- ${item.item_name}: ${item.current_quantity} ${item.unit} (${item.category})`);
-            }
-
-            if (allItems.length > 5) {
-                console.log(`... and ${allItems.length - 5} more items`);
-            }
-
-            // Query specific item
-            console.log('\nQuerying specific item...');
-            const specificItems = await this.inventoryAgent.getInventoryStatus('抽纸');
-            if (specificItems.length > 0) {
-                const item = specificItems[0];
-                console.log(`抽纸: ${item.current_quantity} ${item.unit}`);
-            } else {
-                console.log('抽纸 not found in inventory');
-            }
-
-        } catch (error) {
-            console.error(`Error: ${error}`);
-        }
-    }
-
-    async runFullDemo(): Promise<void> {
-        try {
-            await this.initialize();
-            await this.demonstrateNaturalLanguageCommands();
-            await this.demonstratePhotoProcessing();
-            await this.demonstrateInventoryMonitoring();
-            await this.demonstrateInventoryQueries();
-        } catch (error) {
-            console.error('Demo failed:', error);
-        } finally {
-            await this.cleanup();
-        }
-    }
-
-    async cleanup(): Promise<void> {
-        console.log('\n=== Cleaning up ===');
-
-        try {
-            await this.inventoryAgent.stop();
-            await this.mcpManager.stop();
-            console.log('Cleanup completed successfully');
-        } catch (error) {
-            console.error('Cleanup failed:', error);
-        }
-    }
+    // Display available tools
+    console.log('=== 可用工具 ===');
+    const tools = inventoryAgent.getAvailableTools();
+    tools.forEach(toolName => {
+        const description = inventoryAgent.getToolDescription(toolName);
+        console.log(`- ${toolName}: ${description}`);
+    });
 }
 
-// Run the example if this file is executed directly
+// Run the demonstration
 if (require.main === module) {
-    const example = new InventoryAgentExample();
-    example.runFullDemo().catch(console.error);
+    demonstrateInventoryAgent()
+        .then(() => {
+            console.log('\n库存智能体演示完成！');
+        })
+        .catch(error => {
+            console.error('演示过程中出错:', error);
+        });
 }
+
+export { demonstrateInventoryAgent };

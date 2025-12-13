@@ -2,14 +2,15 @@
 
 ## 概述
 
-购物助手智能体系统采用基于LangChain和LangGraph的多智能体架构，通过专业化智能体协作处理家庭购物管理的各个方面。系统设计为事件驱动的微服务架构，每个智能体负责特定领域的功能，通过LangGraph工作流进行编排和协调。
+购物助手智能体系统采用基于LangChain和LangGraph的统一智能体架构，通过专业化智能体协作处理家庭购物管理的各个方面。系统设计为简化的事件驱动架构，每个智能体都基于统一的 `BaseAgent` 类，通过 DynamicTool 直接集成外部服务。
 
 核心设计原则：
+- **统一架构**: 所有智能体继承自 `BaseAgent`，使用 LangChain 的 `createReactAgent` 作为核心
+- **直接集成**: 通过 DynamicTool 直接访问外部服务，避免不必要的中间层
 - **智能体专业化**: 每个智能体专注于特定领域（库存、采购、财务）
-- **松耦合架构**: 智能体通过消息传递和事件进行通信
-- **可扩展性**: 支持新智能体的动态添加和功能扩展
-- **容错性**: 具备错误恢复和重试机制
-- **多模态交互**: 支持文本、图像和语音输入
+- **简化通信**: 智能体通过 LangGraph 工作流进行协调，减少复杂的消息传递
+- **容错性**: 在工具级别实现错误处理和重试机制
+- **多模态交互**: 支持文本、图像输入，基于 LLM 的自然语言理解
 
 ## 架构
 
@@ -24,9 +25,9 @@ graph TB
     end
 
     subgraph "智能体编排层"
-        LG[LangGraph工作流引擎]
-        Router[智能体路由器]
-        Context[上下文管理器]
+        LG[LangGraph StateGraph]
+        Router[条件路由节点]
+        Context[MemorySaver状态管理]
     end
 
     subgraph "智能体层"
@@ -36,27 +37,16 @@ graph TB
         NA[通知智能体]
     end
 
-    subgraph "服务层"
-        OCR[图像识别服务]
-        NLP[自然语言处理]
-        ML[机器学习服务]
-        Scheduler[定时任务调度器]
-    end
-
-    subgraph "MCP服务层"
-        MCP_DB[数据库MCP服务器]
-        MCP_FILE[文件存储MCP服务器]
-        MCP_NOTIFY[通知MCP服务器]
-    end
-
     subgraph "LangChain内置服务"
         MEMORY[MemorySaver]
         STORE[InMemoryStore]
     end
 
-    subgraph "数据层"
+    subgraph "外部服务层"
         DB[(数据库)]
         Files[文件存储]
+        OCR[OCR服务]
+        Teams[Teams通知]
     end
 
     UI --> Router
@@ -68,28 +58,19 @@ graph TB
     LG --> FA
     LG --> NA
 
+    IA --> DB
+    IA --> Files
     IA --> OCR
-    IA --> NLP
-    PA --> ML
-    FA --> ML
-
-    IA --> MCP_DB
-    IA --> MCP_FILE
-    PA --> MCP_DB
-    PA --> MCP_FILE
-    FA --> MCP_DB
+    PA --> DB
+    PA --> Files
+    PA --> OCR
+    FA --> DB
     FA --> STORE
-    NA --> MCP_NOTIFY
+    NA --> Teams
     NA --> MEMORY
 
     LG --> MEMORY
     LG --> STORE
-
-    MCP_DB --> DB
-    MCP_FILE --> Files
-    MCP_NOTIFY --> Teams
-
-    OCR --> Files
 ```
 
 ### 智能体交互流程
@@ -101,27 +82,22 @@ sequenceDiagram
     participant LG as LangGraph
     participant IA as 库存智能体
     participant PA as 采购智能体
-    participant MCP_DB as 数据库MCP服务器
-    participant MCP_NOTIFY as 通知MCP服务器
     participant DB as 数据库
+    participant Teams as Teams通知
 
     U->>R: "抽纸消耗1包"
     R->>LG: 路由到库存智能体
     LG->>IA: 处理库存更新
-    IA->>MCP_DB: 查询当前库存
-    MCP_DB->>DB: 执行查询
-    DB-->>MCP_DB: 返回库存信息
-    MCP_DB-->>IA: 返回结构化数据
-    IA->>MCP_DB: 更新库存数量
-    MCP_DB->>DB: 执行更新
+    IA->>DB: 查询当前库存 (通过DynamicTool)
+    DB-->>IA: 返回库存信息
+    IA->>DB: 更新库存数量 (通过DynamicTool)
+    DB-->>IA: 确认更新成功
     IA->>LG: 库存更新完成
     LG->>PA: 检查是否需要补货
-    PA->>MCP_DB: 分析历史消费
-    MCP_DB->>DB: 执行分析查询
-    DB-->>MCP_DB: 返回历史数据
-    MCP_DB-->>PA: 返回分析结果
-    PA->>MCP_NOTIFY: 发送补货建议通知
-    MCP_NOTIFY-->>PA: 通知发送确认
+    PA->>DB: 分析历史消费 (通过DynamicTool)
+    DB-->>PA: 返回分析结果
+    PA->>Teams: 发送补货建议通知 (通过DynamicTool)
+    Teams-->>PA: 通知发送确认
     PA-->>LG: 补货建议
     LG->>U: 确认更新并提供建议
 ```
@@ -141,15 +117,18 @@ sequenceDiagram
 **接口:**
 ```typescript
 interface InventoryAgent {
-  processNaturalLanguageCommand(command: string): Promise<InventoryUpdateResult>
-  processPhotoUpload(photoFileId: string, description: string): Promise<ItemAddResult>
-  updateInventory(itemId: string, quantity: number): Promise<boolean>
-  checkInventoryLevels(): Promise<LowStockAlert[]>
-  getInventoryStatus(itemName?: string): Promise<InventoryItem[]>
+  processInventoryCommand(command: string, threadId?: string): Promise<AgentResult>
+  processPhotoUpload(photoFileId: string, description: string, threadId?: string): Promise<AgentResult>
+  checkInventoryLevels(threadId?: string): Promise<AgentResult>
+  getInventoryReport(itemName?: string, threadId?: string): Promise<AgentResult>
+  updateThresholds(thresholds: Record<string, number>): void
+  getThresholds(): Record<string, number>
 
-  // MCP集成方法
-  private callDatabaseMCP(toolName: string, params: any): Promise<any>
-  private callFileStorageMCP(toolName: string, params: any): Promise<any>
+  // 继承自BaseAgent的统一接口
+  invoke(input: string, config?: any): Promise<AgentResult>
+  stream(input: string, config?: any): Promise<AsyncIterable<any>>
+  addTool(tool: DynamicTool): void
+  removeTool(toolName: string): boolean
 }
 ```
 
@@ -164,15 +143,19 @@ interface InventoryAgent {
 **接口:**
 ```typescript
 interface ProcurementAgent {
-  importOrders(fileId: string, platform: string): Promise<ImportResult>
-  generatePurchaseRecommendations(): Promise<PurchaseRecommendation[]>
-  manageTodoList(action: TodoAction, item: TodoItem): Promise<boolean>
-  analyzePurchasePatterns(): Promise<PurchaseAnalysis>
-  optimizePurchaseTiming(items: string[]): Promise<TimingRecommendation[]>
+  importOrders(fileId: string, platform: string, threadId?: string): Promise<AgentResult>
+  generatePurchaseRecommendations(analysisDepthDays?: number, categories?: string[], threadId?: string): Promise<AgentResult>
+  manageShoppingList(action: string, itemData?: any, itemId?: string, threadId?: string): Promise<AgentResult>
+  getOrderHistory(filters?: any, threadId?: string): Promise<AgentResult>
+  analyzePurchasePatterns(timeRange?: string, categories?: string[], threadId?: string): Promise<AgentResult>
+  updateDefaultPlatforms(platforms: string[]): void
+  getDefaultPlatforms(): string[]
 
-  // MCP集成方法
-  private callDatabaseMCP(toolName: string, params: any): Promise<any>
-  private callFileStorageMCP(toolName: string, params: any): Promise<any>
+  // 继承自BaseAgent的统一接口
+  invoke(input: string, config?: any): Promise<AgentResult>
+  stream(input: string, config?: any): Promise<AsyncIterable<any>>
+  addTool(tool: DynamicTool): void
+  removeTool(toolName: string): boolean
 }
 ```
 
@@ -187,18 +170,20 @@ interface ProcurementAgent {
 **接口:**
 ```typescript
 interface FinanceAgent {
-  generateMonthlyReport(month: string): Promise<FinancialReport>
-  detectAnomalousSpending(): Promise<SpendingAlert[]>
-  categorizeExpenses(orderIds: string[]): Promise<CategorizedExpenses>
-  trackBudgetStatus(): Promise<BudgetStatus>
-  generateQuarterlyAnalysis(): Promise<QuarterlyReport>
+  generateMonthlyReport(month: string, threadId?: string): Promise<AgentResult>
+  detectAnomalousSpending(threadId?: string): Promise<AgentResult>
+  categorizeExpenses(orderIds: string[], threadId?: string): Promise<AgentResult>
+  trackBudgetStatus(threadId?: string): Promise<AgentResult>
+  generateQuarterlyAnalysis(threadId?: string): Promise<AgentResult>
 
-  // MCP集成方法
-  private callDatabaseMCP(toolName: string, params: any): Promise<any>
+  // 继承自BaseAgent的统一接口
+  invoke(input: string, config?: any): Promise<AgentResult>
+  stream(input: string, config?: any): Promise<AsyncIterable<any>>
+  addTool(tool: DynamicTool): void
+  removeTool(toolName: string): boolean
 
-  // LangChain内置缓存
-  private cacheAnalysisResult(key: string, result: any): Promise<void>
-  private getCachedResult(key: string): Promise<any | null>
+  // LangChain内置缓存使用
+  // 通过InMemoryStore进行结果缓存
 }
 ```
 
@@ -213,18 +198,20 @@ interface FinanceAgent {
 **接口:**
 ```typescript
 interface NotificationAgent {
-  sendSmartNotification(content: NotificationContent, context: NotificationContext): Promise<boolean>
-  scheduleIntelligentNotification(notification: IntelligentNotification): Promise<string>
-  sendContextualAlert(alert: ContextualAlert): Promise<boolean>
-  optimizeNotificationTiming(userId: string, notificationType: string): Promise<OptimalTiming>
-  analyzeNotificationEffectiveness(): Promise<NotificationAnalytics>
+  sendSmartNotification(content: NotificationContent, context: NotificationContext, threadId?: string): Promise<AgentResult>
+  scheduleIntelligentNotification(notification: IntelligentNotification, threadId?: string): Promise<AgentResult>
+  sendContextualAlert(alert: ContextualAlert, threadId?: string): Promise<AgentResult>
+  optimizeNotificationTiming(userId: string, notificationType: string, threadId?: string): Promise<AgentResult>
+  analyzeNotificationEffectiveness(threadId?: string): Promise<AgentResult>
 
-  // MCP集成方法
-  private callNotificationMCP(toolName: string, params: any): Promise<any>
+  // 继承自BaseAgent的统一接口
+  invoke(input: string, config?: any): Promise<AgentResult>
+  stream(input: string, config?: any): Promise<AsyncIterable<any>>
+  addTool(tool: DynamicTool): void
+  removeTool(toolName: string): boolean
 
   // LangChain内置状态管理
-  private saveConversationState(conversationId: string, state: any): Promise<void>
-  private loadConversationState(conversationId: string): Promise<any>
+  // 通过MemorySaver进行对话状态管理
 }
 
 // 智能通知相关模型
@@ -266,68 +253,74 @@ interface NotificationAnalytics {
 }
 ```
 
-### MCP服务器组件
+### DynamicTool 工具组件
 
-#### 数据库MCP服务器
+#### 数据库工具集
 
 **职责:**
-- 提供统一的数据库访问接口
+- 直接提供数据库访问功能
 - 处理SQL查询和事务管理
-- 实现数据访问权限控制
-- 提供查询优化和缓存
+- 实现错误处理和重试机制
+- 提供数据验证和转换
 
-**MCP工具接口:**
+**工具接口示例:**
 ```typescript
-interface DatabaseMCPTools {
-  // 库存相关操作
-  getInventoryItem(itemName: string): Promise<InventoryItem | null>
-  updateInventoryQuantity(itemId: string, quantity: number): Promise<boolean>
-  addInventoryItem(item: CreateInventoryItem): Promise<string>
-  searchInventoryItems(criteria: SearchCriteria): Promise<InventoryItem[]>
+// 库存相关工具
+const getInventoryItemTool = new DynamicTool({
+  name: 'getInventoryItem',
+  description: '根据物品名称查询库存信息',
+  func: async (input: string) => {
+    const { itemName } = JSON.parse(input);
+    // 直接调用数据库服务
+    const result = await databaseService.getInventoryItem(itemName);
+    return JSON.stringify(result);
+  }
+});
 
-  // 订单相关操作 (支持主表+子表结构)
-  createOrder(order: CreateOrder): Promise<string> // 支持订单商品明细
-  getOrderHistory(filters: OrderFilters): Promise<Order[]>
-  getOrderDetails(orderId: string): Promise<{order: Order, items: OrderItem[]}>
-  getOrderItems(orderId: string): Promise<OrderItem[]>
-  addOrderItems(orderId: string, items: CreateOrderItem[]): Promise<string[]>
-  updateOrderStatus(orderId: string, status: string): Promise<boolean>
-
-  // 购物清单操作
-  getShoppingList(): Promise<ShoppingListItem[]>
-  addToShoppingList(item: CreateShoppingListItem): Promise<string>
-  updateShoppingListItem(id: string, updates: Partial<ShoppingListItem>): Promise<boolean>
-  removeFromShoppingList(id: string): Promise<boolean>
-
-  // 财务分析操作
-  getSpendingByCategory(dateRange: DateRange): Promise<CategorySpending[]>
-  getMonthlyReport(month: string): Promise<MonthlyReport>
-  detectAnomalousSpending(threshold: number): Promise<SpendingAnomaly[]>
-
-  // 通用查询操作
-  executeQuery(sql: string, params: any[]): Promise<QueryResult>
-  executeTransaction(operations: DatabaseOperation[]): Promise<TransactionResult>
-}
+// 订单相关工具
+const importOrdersTool = new DynamicTool({
+  name: 'import_orders',
+  description: '导入订单数据到数据库',
+  func: async (input: string) => {
+    const { orders, platform } = JSON.parse(input);
+    // 直接调用数据库服务，包含重复检测逻辑
+    const result = await databaseService.importOrders(orders, platform);
+    return JSON.stringify(result);
+  }
+});
 ```
 
-#### 文件存储MCP服务器
+#### 文件存储工具集
 
 **职责:**
-- 管理图片和文档存储
+- 直接管理图片和文档存储
 - 提供OCR和图像处理服务
 - 处理Excel文件解析
-- 实现文件版本控制
+- 实现文件操作的错误处理
 
-**MCP工具接口:**
+**工具接口示例:**
 ```typescript
-interface FileStorageMCPTools {
-  uploadFile(file: Buffer, metadata: FileMetadata): Promise<string>
-  downloadFile(fileId: string): Promise<Buffer>
-  processImage(fileId: string, options: ImageProcessingOptions): Promise<OCRResult>
-  parseExcelFile(fileId: string, sheetName?: string): Promise<ExcelData>
-  deleteFile(fileId: string): Promise<boolean>
-  getFileMetadata(fileId: string): Promise<FileMetadata>
-}
+const processImageTool = new DynamicTool({
+  name: 'processImage',
+  description: '处理图片并进行OCR识别',
+  func: async (input: string) => {
+    const { fileId } = JSON.parse(input);
+    // 直接调用OCR服务
+    const result = await ocrService.processImage(fileId);
+    return JSON.stringify(result);
+  }
+});
+
+const parseExcelTool = new DynamicTool({
+  name: 'parse_excel_file',
+  description: '解析Excel文件中的订单数据',
+  func: async (input: string) => {
+    const { fileId, platform } = JSON.parse(input);
+    // 直接调用Excel解析服务
+    const result = await excelService.parseFile(fileId, platform);
+    return JSON.stringify(result);
+  }
+});
 ```
 
 #### 缓存和状态管理
@@ -357,42 +350,42 @@ interface AgentStateManager {
 }
 ```
 
-#### 通知MCP服务器
+#### 通知工具集
 
 **职责:**
-- 统一的通知发送接口
+- 直接发送多渠道通知
 - 支持多种通知渠道（Teams、钉钉、企业微信、Slack等）
 - 通知模板管理和个性化
 - 通知发送状态跟踪和重试
 
-**MCP工具接口:**
+**工具接口示例:**
 ```typescript
-interface NotificationMCPTools {
-  // 基础通知发送
-  sendNotification(notification: NotificationRequest): Promise<NotificationResult>
-  sendBulkNotifications(notifications: NotificationRequest[]): Promise<NotificationResult[]>
+const sendNotificationTool = new DynamicTool({
+  name: 'send_notification',
+  description: '发送通知消息',
+  func: async (input: string) => {
+    const { message, channels, priority } = JSON.parse(input);
+    // 直接调用通知服务
+    const result = await notificationService.sendNotification({
+      message,
+      channels,
+      priority
+    });
+    return JSON.stringify(result);
+  }
+});
 
-  // 渠道管理
-  configureChannel(channelConfig: NotificationChannelConfig): Promise<boolean>
-  getAvailableChannels(): Promise<NotificationChannel[])
-  testChannelConnection(channelName: string): Promise<ChannelTestResult>
-
-  // 模板管理
-  createTemplate(template: NotificationTemplate): Promise<string>
-  updateTemplate(templateId: string, template: Partial<NotificationTemplate>): Promise<boolean>
-  getTemplate(templateId: string): Promise<NotificationTemplate | null>
-  renderTemplate(templateId: string, data: any): Promise<RenderedNotification>
-
-  // 订阅和偏好管理
-  subscribeUser(userId: string, preferences: NotificationPreferences): Promise<boolean>
-  updateUserPreferences(userId: string, preferences: Partial<NotificationPreferences>): Promise<boolean>
-  getUserPreferences(userId: string): Promise<NotificationPreferences | null>
-
-  // 通知历史和状态
-  getNotificationStatus(notificationId: string): Promise<NotificationStatus>
-  getNotificationHistory(filters: NotificationHistoryFilters): Promise<NotificationHistoryItem[]>
-  retryFailedNotification(notificationId: string): Promise<NotificationResult>
-}
+const sendTeamsNotificationTool = new DynamicTool({
+  name: 'send_teams_notification',
+  description: '发送Teams通知',
+  func: async (input: string) => {
+    const { message, webhookUrl } = JSON.parse(input);
+    // 直接调用Teams API
+    const result = await teamsService.sendMessage(message, webhookUrl);
+    return JSON.stringify(result);
+  }
+});
+```
 
 // 通知相关数据模型
 interface NotificationRequest {
@@ -475,29 +468,72 @@ interface ChannelResult {
 }
 ```
 
-### LangGraph工作流引擎
+### LangGraph 原生工作流
 
-**核心功能:**
-- 智能体编排和协调
-- 状态管理和持久化
-- 错误处理和重试
-- 并行任务执行
-- MCP服务器集成管理
+**使用 LangGraph 内置功能:**
+- 直接使用 `StateGraph` 进行智能体编排
+- 使用 `MemorySaver` 进行状态持久化
+- 利用 LangGraph 的内置错误处理和重试机制
+- 使用 LangGraph 的并行执行和条件路由
 
-**接口:**
+**实现方式:**
 ```typescript
-interface LangGraphWorkflow {
-  executeWorkflow(workflowId: string, input: any): Promise<WorkflowResult>
-  createWorkflow(definition: WorkflowDefinition): Promise<string>
-  getWorkflowStatus(workflowId: string): Promise<WorkflowStatus>
-  pauseWorkflow(workflowId: string): Promise<boolean>
-  resumeWorkflow(workflowId: string): Promise<boolean>
+import { StateGraph, MemorySaver } from "@langchain/langgraph";
+import { BaseAgent } from "./agents/base/BaseAgent";
 
-  // MCP集成方法
-  registerMCPServer(serverConfig: MCPServerConfig): Promise<boolean>
-  callMCPTool(serverName: string, toolName: string, params: any): Promise<any>
-  getMCPServerStatus(serverName: string): Promise<MCPServerStatus>
+// 定义工作流状态
+interface WorkflowState {
+  userInput: string;
+  currentAgent: string;
+  agentResults: Record<string, any>;
+  finalResponse: string;
 }
+
+// 创建状态图
+const workflow = new StateGraph<WorkflowState>({
+  channels: {
+    userInput: null,
+    currentAgent: null,
+    agentResults: {},
+    finalResponse: null,
+  }
+});
+
+// 添加智能体节点
+workflow.addNode("inventory", async (state) => {
+  const agent = inventoryAgent;
+  const result = await agent.invoke(state.userInput);
+  return { ...state, agentResults: { ...state.agentResults, inventory: result } };
+});
+
+workflow.addNode("procurement", async (state) => {
+  const agent = procurementAgent;
+  const result = await agent.invoke(state.userInput);
+  return { ...state, agentResults: { ...state.agentResults, procurement: result } };
+});
+
+// 添加路由逻辑
+workflow.addConditionalEdges(
+  "router",
+  (state) => {
+    // 基于用户输入决定路由到哪个智能体
+    if (state.userInput.includes("库存") || state.userInput.includes("消耗")) {
+      return "inventory";
+    } else if (state.userInput.includes("订单") || state.userInput.includes("采购")) {
+      return "procurement";
+    }
+    return "inventory"; // 默认路由
+  },
+  {
+    inventory: "inventory",
+    procurement: "procurement",
+  }
+);
+
+// 编译工作流
+const app = workflow.compile({
+  checkpointer: new MemorySaver(),
+});
 ```
 
 ## 数据模型
@@ -515,16 +551,29 @@ interface AgentState {
 }
 ```
 
-### 工作流状态模型
+### LangGraph 工作流状态模型
 
 ```typescript
+// 使用 LangGraph 的内置状态管理
 interface WorkflowState {
-  workflowId: string
-  currentStep: string
-  stepHistory: WorkflowStep[]
-  globalContext: Record<string, any>
-  agentStates: Map<string, AgentState>
-  status: 'running' | 'completed' | 'failed' | 'paused'
+  userInput: string
+  currentAgent: string
+  agentResults: Record<string, any>
+  finalResponse: string
+  metadata?: {
+    threadId: string
+    timestamp: Date
+    userId?: string
+  }
+}
+
+// LangGraph 自动管理的状态
+interface LangGraphInternalState {
+  // LangGraph 内部维护的状态，包括：
+  // - 节点执行历史
+  // - 检查点数据
+  // - 错误状态
+  // - 重试计数等
 }
 ```
 
@@ -626,34 +675,17 @@ interface ConversationTurn {
   timestamp: Date
 }
 
-// MCP相关模型
-interface MCPServerConfig {
-  serverName: string
-  serverType: 'database' | 'file-storage' | 'notification' | 'custom'
-  connectionString: string
-  authConfig?: MCPAuthConfig
-  capabilities: string[]
-  healthCheckEndpoint?: string
+// 工具相关模型
+interface ToolConfig {
+  name: string
+  description: string
+  category: 'database' | 'file-storage' | 'notification'
   retryPolicy: RetryPolicy
+  timeout: number
 }
 
-interface MCPAuthConfig {
-  authType: 'none' | 'api-key' | 'oauth' | 'certificate'
-  credentials: Record<string, string>
-}
-
-interface MCPServerStatus {
-  serverName: string
-  status: 'connected' | 'disconnected' | 'error' | 'initializing'
-  lastHealthCheck: Date
-  errorMessage?: string
-  capabilities: string[]
-  responseTime: number
-}
-
-interface MCPToolCall {
+interface ToolCall {
   callId: string
-  serverName: string
   toolName: string
   parameters: any
   timestamp: Date
@@ -661,6 +693,13 @@ interface MCPToolCall {
   success: boolean
   result?: any
   error?: string
+}
+
+interface RetryPolicy {
+  maxRetries: number
+  backoffStrategy: 'exponential' | 'linear' | 'fixed'
+  baseDelay: number
+  maxDelay: number
 }
 
 // 文件处理相关模型
@@ -815,29 +854,33 @@ interface RetryPolicy {
 
 1. **库存智能体错误处理**
    - OCR失败: 请求用户手动输入
-   - MCP数据库服务不可用: 使用LangChain InMemoryStore临时存储
+   - 数据库服务不可用: 使用LangChain InMemoryStore临时存储
    - 无效命令: 提供建议和示例
+   - 工具调用超时: 自动重试和降级处理
 
 2. **采购智能体错误处理**
    - 文件解析失败: 提供格式要求和示例
-   - MCP文件存储服务异常: 降级到本地临时存储
+   - 文件存储服务异常: 降级到本地临时存储
    - 数据重复: 智能去重和用户确认
+   - 订单导入失败: 部分导入和错误报告
 
 3. **财务智能体错误处理**
    - 计算异常: 回退到简化算法
-   - MCP数据库查询超时: 使用缓存数据生成部分报告
+   - 数据库查询超时: 使用缓存数据生成部分报告
    - 异常检测误报: 用户反馈学习机制
+   - 报告生成失败: 提供简化版本报告
 
 4. **通知智能体错误处理**
    - 通知发送失败: 切换到备用通知渠道
-   - MCP通知服务异常: 降级到简单邮件通知
+   - 通知服务异常: 降级到简单邮件通知
    - 用户偏好获取失败: 使用默认通知设置
+   - 渠道不可用: 自动切换到可用渠道
 
-5. **MCP服务错误处理**
+5. **工具级别错误处理**
    - 连接超时: 自动重试和断路器模式
    - 工具调用失败: 降级到备用实现
-   - 服务不可用: 切换到备用MCP服务器
-   - 通知渠道故障: 自动切换到可用渠道
+   - 服务不可用: 使用缓存数据或简化功能
+   - 参数验证失败: 提供详细的错误信息和建议
 
 ### 系统级别错误恢复
 
@@ -924,9 +967,10 @@ const inventoryCommandGenerator = fc.record({
 - 错误路径覆盖率: 所有定义的错误处理场景
 - 集成覆盖率: 所有智能体间交互路径
 
-**MCP测试策略:**
-- **MCP服务器模拟**: 为每个MCP服务器（数据库、文件存储、缓存、通知）创建测试替身
-- **契约测试**: 验证智能体与MCP服务器的接口契约
-- **故障注入测试**: 模拟MCP服务器故障场景和渠道切换
+**工具集成测试策略:**
+- **工具模拟**: 为每个工具类别（数据库、文件存储、通知）创建测试替身
+- **契约测试**: 验证智能体与工具的接口契约
+- **故障注入测试**: 模拟外部服务故障场景和降级处理
 - **通知集成测试**: 验证多渠道通知发送和回退机制
-- **性能测试**: 验证MCP调用的响应时间和吞吐量
+- **性能测试**: 验证工具调用的响应时间和吞吐量
+- **错误恢复测试**: 验证工具级别的重试和降级机制

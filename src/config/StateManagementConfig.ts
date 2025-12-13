@@ -5,6 +5,7 @@
 
 import { AgentStateManager, StateManagerConfig } from '../state/AgentStateManager';
 import { LangGraphWorkflowEngine, LangGraphWorkflowConfig } from '../workflows/LangGraphWorkflowEngine';
+import { StateManagementService } from '../services/StateManagementService';
 import { Logger } from '../utils/Logger';
 
 export interface StateManagementSystemConfig {
@@ -46,6 +47,7 @@ export class StateManagementFactory {
     ): {
         stateManager: AgentStateManager;
         workflowEngine: LangGraphWorkflowEngine;
+        stateManagementService: StateManagementService;
     } {
         const fullConfig: StateManagementSystemConfig = {
             stateManager: {
@@ -89,11 +91,18 @@ export class StateManagementFactory {
             fullConfig.workflowEngine
         );
 
+        // Initialize the new StateManagementService
+        const stateManagementService = StateManagementService.getInstance();
+        stateManagementService.initialize().catch(error => {
+            this.logger.error('Failed to initialize StateManagementService', { error });
+        });
+
         this.logger.info('State management system created successfully');
 
         return {
             stateManager: this.stateManager,
             workflowEngine: this.workflowEngine,
+            stateManagementService,
         };
     }
 
@@ -243,8 +252,16 @@ export function createConfiguredStateManagement(
 ): {
     stateManager: AgentStateManager;
     workflowEngine: LangGraphWorkflowEngine;
+    stateManagementService: StateManagementService;
 } {
     const factory = StateManagementFactory.getInstance();
     const config = getStateManagementConfig(environment);
     return factory.createStateManagementSystem(config);
+}
+
+/**
+ * Utility function to get the StateManagementService instance
+ */
+export function getStateManagementService(): StateManagementService {
+    return StateManagementService.getInstance();
 }

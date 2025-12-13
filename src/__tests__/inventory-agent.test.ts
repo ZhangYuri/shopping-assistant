@@ -1,293 +1,256 @@
 /**
- * Inventory Agent Tests
+ * Tests for the new InventoryAgent implementation
  */
 
 import { InventoryAgent } from '@/agents/InventoryAgent';
-import { MCPManager } from '@/mcp/MCPManager';
-import { AgentConfig } from '@/types/agent.types';
+import { ChatDeepSeek } from '@langchain/deepseek';
 
-// Mock MCP Manager
-const mockMCPManager = {
-    isServerRegistered: jest.fn().mockReturnValue(true),
-    callTool: jest.fn(),
-} as unknown as MCPManager;
+// Mock the ChatDeepSeek to avoid API calls in tests
+jest.mock('@langchain/deepseek', () => ({
+    ChatDeepSeek: jest.fn().mockImplementation(() => ({
+        invoke: jest.fn().mockResolvedValue({
+            content: '模拟的智能体回复：操作已完成',
+        }),
+        stream: jest.fn().mockImplementation(async function* () {
+            yield { content: '模拟' };
+            yield { content: '流式' };
+            yield { content: '回复' };
+        }),
+    })),
+}));
 
-// Mock agent config
-const mockConfig: AgentConfig = {
-    agentId: 'inventory-test',
-    agentType: 'inventory',
-    name: 'Test Inventory Agent',
-    description: 'Test inventory agent',
-    capabilities: ['natural_language_inventory'],
-    retryPolicy: {
-        maxRetries: 3,
-        backoffStrategy: 'exponential',
-        baseDelay: 1000,
-        maxDelay: 5000,
-    },
-    maxConcurrentTasks: 5,
-    timeoutMs: 30000,
-};
+// Mock createReactAgent to avoid LangGraph initialization
+jest.mock('@langchain/langgraph/prebuilt', () => ({
+    createReactAgent: jest.fn().mockImplementation(() => ({
+        invoke: jest.fn().mockResolvedValue({
+            messages: [
+                {
+                    content: '模拟的智能体回复：操作已完成',
+                    role: 'assistant',
+                },
+            ],
+        }),
+        stream: jest.fn().mockImplementation(async function* () {
+            yield {
+                messages: [{ content: '模拟流式回复' }],
+            };
+        }),
+    })),
+}));
+
+// Mock MemorySaver
+jest.mock('@langchain/langgraph', () => ({
+    MemorySaver: jest.fn().mockImplementation(() => ({})),
+}));
 
 describe('InventoryAgent', () => {
-    let agent: InventoryAgent;
+    let inventoryAgent: InventoryAgent;
 
     beforeEach(() => {
-        jest.clearAllMocks();
-        agent = new InventoryAgent(mockConfig, mockMCPManager);
-    });
+        // Create mock tools
+        const { databaseTools, fileStorageTools, notificationTools } = InventoryAgent.createInventoryTools();
 
-    describe('Natural Language Command Processing', () => {
-        test('should parse consumption command correctly', async () => {
-            // Mock database response
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        id: 1,
-                        item_name: '抽纸',
-                        current_quantity: 5,
-                        unit: '包',
-                        category: '日用品',
-                    },
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: true,
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        id: 1,
-                        item_name: '抽纸',
-                        current_quantity: 4,
-                        unit: '包',
-                        category: '日用品',
-                    },
-                });
-
-            const result = await agent.processNaturalLanguageCommand('抽纸消耗1包');
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('成功消耗');
-            expect(result.previousQuantity).toBe(5);
-            expect(result.newQuantity).toBe(4);
-        });
-
-        test('should parse addition command correctly', async () => {
-            // Mock database response for new item
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: null, // Item doesn't exist
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: '123', // New item ID
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [{
-                        id: 123,
-                        item_name: '牛奶',
-                        current_quantity: 2,
-                        unit: '瓶',
-                        category: '食品',
-                    }],
-                });
-
-            const result = await agent.processNaturalLanguageCommand('添加牛奶2瓶');
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('成功添加新物品');
-            expect(result.newQuantity).toBe(2);
-        });
-
-        test('should handle insufficient stock', async () => {
-            // Mock database response
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        id: 1,
-                        item_name: '抽纸',
-                        current_quantity: 1,
-                        unit: '包',
-                        category: '日用品',
-                    },
-                });
-
-            const result = await agent.processNaturalLanguageCommand('抽纸消耗3包');
-
-            expect(result.success).toBe(false);
-            expect(result.message).toContain('库存不足');
-        });
-
-        test('should handle unclear commands', async () => {
-            const result = await agent.processNaturalLanguageCommand('不清楚的命令');
-
-            expect(result.success).toBe(false);
-            expect(result.message).toContain('命令不够清晰');
+        // Initialize agent with test configuration
+        inventoryAgent = new InventoryAgent({
+            agentId: 'test-inventory-agent',
+            name: 'TestInventoryAgent',
+            description: 'Test inventory agent for unit testing',
+            databaseTools,
+            fileStorageTools,
+            notificationTools,
+            defaultThresholds: {
+                '日用品': 2,
+                '食品': 3,
+            },
+            // Use mocked model for testing
+            model: new ChatDeepSeek({
+                apiKey: 'mock-key',
+                model: 'deepseek-chat',
+            }),
         });
     });
 
-    describe('Inventory Threshold Monitoring', () => {
-        test('should detect low stock items', async () => {
-            // Mock database responses for different categories
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [{
-                        id: 1,
-                        item_name: '抽纸',
-                        current_quantity: 1,
-                        unit: '包',
-                        category: '日用品',
-                    }],
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [],
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [],
-                })
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [],
-                });
-
-            const alerts = await agent.checkInventoryLevels();
-
-            expect(alerts).toHaveLength(1);
-            expect(alerts[0].item.item_name).toBe('抽纸');
-            expect(alerts[0].recommendedAction).toContain('建议');
+    describe('Initialization', () => {
+        it('should initialize successfully', async () => {
+            await expect(inventoryAgent.initialize()).resolves.not.toThrow();
         });
 
-        test('should handle empty inventory', async () => {
-            // Mock empty responses
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValue({
-                    success: true,
-                    data: [],
-                });
+        it('should have correct configuration', () => {
+            const config = inventoryAgent.getConfig();
+            expect(config.agentId).toBe('test-inventory-agent');
+            expect(config.name).toBe('TestInventoryAgent');
+            expect(config.tools.length).toBeGreaterThan(0);
+        });
 
-            const alerts = await agent.checkInventoryLevels();
-
-            expect(alerts).toHaveLength(0);
+        it('should have default thresholds set', () => {
+            const thresholds = inventoryAgent.getThresholds();
+            expect(thresholds['日用品']).toBe(2);
+            expect(thresholds['食品']).toBe(3);
         });
     });
 
-    describe('Photo Processing', () => {
-        test('should handle successful OCR processing', async () => {
-            // Mock file metadata
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        fileId: 'test-file-id',
-                        mimeType: 'image/jpeg',
-                        originalName: 'test.jpg',
-                    },
-                })
-                // Mock OCR result
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        extractedText: '维他奶 豆奶 250ml',
-                        confidence: 0.9,
-                        detectedFields: [{
-                            fieldType: 'product_name',
-                            value: '维他奶',
-                            confidence: 0.9,
-                        }],
-                    },
-                });
-
-            const result = await agent.processPhotoUpload('test-file-id', '维他奶');
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('成功处理照片');
+    describe('Tool Management', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
         });
 
-        test('should handle OCR failure gracefully', async () => {
-            // Mock file metadata
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        fileId: 'test-file-id',
-                        mimeType: 'image/jpeg',
-                        originalName: 'test.jpg',
-                    },
-                })
-                // Mock OCR failure
-                .mockResolvedValueOnce({
-                    success: false,
-                    error: 'OCR processing failed',
-                });
-
-            const result = await agent.processPhotoUpload('test-file-id', '手动输入的物品');
-
-            expect(result.success).toBe(true);
-            expect(result.message).toContain('图像识别失败，已根据描述处理');
+        it('should have required database tools', () => {
+            const tools = inventoryAgent.getAvailableTools();
+            expect(tools).toContain('getInventoryItem');
+            expect(tools).toContain('updateInventoryQuantity');
+            expect(tools).toContain('addInventoryItem');
+            expect(tools).toContain('searchInventoryItems');
         });
 
-        test('should reject non-image files', async () => {
-            // Mock file metadata for non-image
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: {
-                        fileId: 'test-file-id',
-                        mimeType: 'text/plain',
-                        originalName: 'test.txt',
-                    },
-                });
+        it('should have file storage tools', () => {
+            const tools = inventoryAgent.getAvailableTools();
+            expect(tools).toContain('processImage');
+            expect(tools).toContain('getFileMetadata');
+        });
 
-            const result = await agent.processPhotoUpload('test-file-id', '测试');
+        it('should have notification tools', () => {
+            const tools = inventoryAgent.getAvailableTools();
+            expect(tools).toContain('sendLowStockAlert');
+            expect(tools).toContain('notifyProcurementAgent');
+        });
 
-            expect(result.success).toBe(false);
-            expect(result.message).toContain('文件不是图片格式');
+        it('should provide tool descriptions', () => {
+            const description = inventoryAgent.getToolDescription('getInventoryItem');
+            expect(description).toBeDefined();
+            expect(description).toContain('查询库存信息');
         });
     });
 
-    describe('Inventory Health Report', () => {
-        test('should generate comprehensive health report', async () => {
-            // Mock all inventory items
-            (mockMCPManager.callTool as jest.Mock)
-                .mockResolvedValueOnce({
-                    success: true,
-                    data: [
-                        {
-                            id: 1,
-                            item_name: '抽纸',
-                            current_quantity: 5,
-                            category: '日用品',
-                            updated_at: new Date(),
-                        },
-                        {
-                            id: 2,
-                            item_name: '牛奶',
-                            current_quantity: 2,
-                            category: '食品',
-                            updated_at: new Date(),
-                        },
-                    ],
-                })
-                // Mock low stock check (empty results for simplicity)
-                .mockResolvedValue({
-                    success: true,
-                    data: [],
-                });
+    describe('Inventory Operations', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
+        });
 
-            const report = await agent.getInventoryHealthReport();
+        it('should process natural language commands', async () => {
+            const result = await inventoryAgent.processInventoryCommand('查询抽纸库存');
 
-            expect(report.totalItems).toBe(2);
-            expect(report.categoryBreakdown).toHaveProperty('日用品', 1);
-            expect(report.categoryBreakdown).toHaveProperty('食品', 1);
-            expect(report.recommendations).toContain('库存状况良好，无需特别关注');
+            expect(result.success).toBe(true);
+            expect(result.messages).toBeDefined();
+            expect(result.messages.length).toBeGreaterThan(0);
+            expect(result.duration).toBeGreaterThanOrEqual(0);
+        });
+
+        it('should handle photo upload requests', async () => {
+            const result = await inventoryAgent.processPhotoUpload('test-photo-id', '新买的抽纸');
+
+            expect(result.success).toBe(true);
+            expect(result.messages).toBeDefined();
+            expect(result.duration).toBeGreaterThanOrEqual(0);
+        });
+
+        it('should check inventory levels', async () => {
+            const result = await inventoryAgent.checkInventoryLevels();
+
+            expect(result.success).toBe(true);
+            expect(result.messages).toBeDefined();
+        });
+
+        it('should generate inventory reports', async () => {
+            const result = await inventoryAgent.getInventoryReport();
+
+            expect(result.success).toBe(true);
+            expect(result.messages).toBeDefined();
+        });
+
+        it('should generate item-specific reports', async () => {
+            const result = await inventoryAgent.getInventoryReport('抽纸');
+
+            expect(result.success).toBe(true);
+            expect(result.messages).toBeDefined();
+        });
+    });
+
+    describe('Threshold Management', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
+        });
+
+        it('should update thresholds', () => {
+            const newThresholds = { '日用品': 5, '清洁用品': 3 };
+            inventoryAgent.updateThresholds(newThresholds);
+
+            const updatedThresholds = inventoryAgent.getThresholds();
+            expect(updatedThresholds['日用品']).toBe(5);
+            expect(updatedThresholds['清洁用品']).toBe(3);
+        });
+
+        it('should preserve existing thresholds when updating', () => {
+            inventoryAgent.updateThresholds({ '个人护理': 4 });
+
+            const thresholds = inventoryAgent.getThresholds();
+            expect(thresholds['日用品']).toBe(2); // Original value preserved
+            expect(thresholds['食品']).toBe(3); // Original value preserved
+            expect(thresholds['个人护理']).toBe(4); // New value added
+        });
+    });
+
+    describe('Metrics and Monitoring', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
+        });
+
+        it('should track metrics', async () => {
+            const initialMetrics = inventoryAgent.getMetrics();
+            expect(initialMetrics.tasksCompleted).toBe(0);
+            expect(initialMetrics.tasksFailedCount).toBe(0);
+
+            // Process a command to update metrics
+            await inventoryAgent.processInventoryCommand('查询库存');
+
+            const updatedMetrics = inventoryAgent.getMetrics();
+            expect(updatedMetrics.tasksCompleted).toBe(1);
+            expect(updatedMetrics.averageResponseTime).toBeGreaterThanOrEqual(0);
+        });
+
+        it('should update last active time', async () => {
+            const initialMetrics = inventoryAgent.getMetrics();
+            const initialTime = initialMetrics.lastActiveTime;
+
+            // Wait a bit and process a command
+            await new Promise(resolve => setTimeout(resolve, 10));
+            await inventoryAgent.processInventoryCommand('查询库存');
+
+            const updatedMetrics = inventoryAgent.getMetrics();
+            expect(updatedMetrics.lastActiveTime.getTime()).toBeGreaterThan(initialTime.getTime());
+        });
+    });
+
+    describe('Error Handling', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
+        });
+
+        it('should handle empty commands gracefully', async () => {
+            const result = await inventoryAgent.processInventoryCommand('');
+
+            // Should not throw, but may return an error response
+            expect(result).toBeDefined();
+            expect(result.success).toBeDefined();
+        });
+
+        it('should handle invalid photo IDs', async () => {
+            const result = await inventoryAgent.processPhotoUpload('invalid-id', '测试描述');
+
+            expect(result).toBeDefined();
+            expect(result.success).toBeDefined();
+        });
+    });
+
+    describe('Streaming Responses', () => {
+        beforeEach(async () => {
+            await inventoryAgent.initialize();
+        });
+
+        it('should support streaming responses', async () => {
+            const stream = await inventoryAgent.stream('生成库存报告');
+
+            expect(stream).toBeDefined();
+            expect(typeof stream[Symbol.asyncIterator]).toBe('function');
         });
     });
 });

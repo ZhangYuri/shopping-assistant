@@ -2,6 +2,7 @@
 // This file is kept for reference during migration
 
 import { ChatDeepSeek } from '@langchain/deepseek';
+import { createAgent } from 'langchain';
 
 export function createDeepSeekModel() {
     return new ChatDeepSeek({
@@ -9,6 +10,7 @@ export function createDeepSeekModel() {
         model: 'deepseek-chat',
     });
 }
+
 
 // Example usage (commented out):
 // const model = createDeepSeekModel();
