@@ -5,6 +5,7 @@
 import { ProcurementAgent } from '@/agents/ProcurementAgent';
 import { MCPManager } from '@/mcp/MCPManager';
 import { AgentConfig } from '@/types/agent.types';
+import * as fc from 'fast-check';
 
 // Mock MCPManager
 const mockMCPManager = {
@@ -465,4 +466,390 @@ describe('ProcurementAgent', () => {
             expect(recommendations).toHaveLength(0);
         });
     });
+
+    describe('Property-Based Tests', () => {
+        /**
+         * **Feature: shopping-assistant-agents, Property 7: Duplicate data detection**
+         * **Validates: Requirements 4.4**
+         *
+         * For any imported order data, the system should detect and prevent the creation of duplicate entries.
+         */
+        test('Property 7: Duplicate data detection', async () => {
+            await fc.assert(
+                fc.asyncProperty(
+                    // Generator for order data that could be duplicated
+                    fc.record({
+                        orderId: fc.stringOf(fc.char().filter(c => /[A-Z0-9]/.test(c)), { minLength: 8, maxLength: 20 })
+                            .filter(s => s.trim().length >= 8),
+                        storeName: fc.stringOf(fc.char().filter(c => /[a-zA-Z0-9\u4e00-\u9fff]/.test(c)), { minLength: 2, maxLength: 30 })
+                            .filter(s => s.trim().length >= 2),
+                        totalPrice: fc.float({ min: Math.fround(1.0), max: Math.fround(10000), noNaN: true }),
+                        platform: fc.constantFrom('淘宝', '1688', '京东', '抖音商城', '中免日上', '拼多多'),
+                        items: fc.array(
+                            fc.record({
+                                itemName: fc.stringOf(fc.char().filter(c => /[a-zA-Z0-9\u4e00-\u9fff]/.test(c)), { minLength: 2, maxLength: 50 })
+                                    .filter(s => s.trim().length >= 2),
+                                quantity: fc.integer({ min: 1, max: 100 }),
+                                unitPrice: fc.option(fc.float({ min: Math.fround(1.0), max: Math.fround(1000), noNaN: true }), { nil: undefined })
+                            }),
+                            { minLength: 1, maxLength: 3 }
+                        )
+                    }),
+                    async (orderData) => {
+                        // Create mock Excel data for the order
+                        const mockExcelData = createMockExcelDataForPlatform(orderData.platform, orderData);
+
+                        // Track whether we're in the first or second import call
+                        let isFirstImport = true;
+                        let createOrderCallCount = 0;
+
+                        // Mock implementation that handles both first and second import
+                        (mockMCPManager.callTool as jest.Mock).mockImplementation((serverName: string, toolName: string) => {
+                            if (serverName === 'file-storage-server' && toolName === 'getFileMetadata') {
+                                return Promise.resolve({
+                                    success: true,
+                                    data: {
+                                        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                        originalName: `${orderData.platform}_orders.xlsx`,
+                                    },
+                                });
+                            }
+
+                            if (serverName === 'file-storage-server' && toolName === 'parseExcelFile') {
+                                return Promise.resolve({
+                                    success: true,
+                                    data: mockExcelData,
+                                });
+                            }
+
+                            if (serverName === 'database-server' && toolName === 'getOrderDetails') {
+                                if (isFirstImport) {
+                                    // First call: order doesn't exist
+                                    return Promise.resolve({
+                                        success: false,
+                                        error: { message: 'Order not found' },
+                                    });
+                                } else {
+                                    // Second call: order exists (duplicate detected)
+                                    return Promise.resolve({
+                                        success: true,
+                                        data: {
+                                            order: {
+                                                id: orderData.orderId,
+                                                store_name: orderData.storeName,
+                                                total_price: orderData.totalPrice,
+                                                purchase_channel: orderData.platform,
+                                            },
+                                            items: orderData.items.map(item => ({
+                                                item_name: item.itemName,
+                                                purchase_quantity: item.quantity,
+                                                unit_price: item.unitPrice,
+                                            })),
+                                        },
+                                    });
+                                }
+                            }
+
+                            if (serverName === 'database-server' && toolName === 'createOrder') {
+                                createOrderCallCount++;
+                                if (isFirstImport) {
+                                    return Promise.resolve({
+                                        success: true,
+                                        data: orderData.orderId,
+                                    });
+                                } else {
+                                    // Should not reach here for duplicate
+                                    throw new Error('createOrder should not be called for duplicate orders');
+                                }
+                            }
+
+                            return Promise.resolve({ success: false });
+                        });
+
+                        // First import should succeed
+                        const firstImportResult = await agent.importOrders('test-file-id-1', orderData.platform);
+
+                        // Property assertion: First import should succeed
+                        if (!firstImportResult.success) {
+                            console.log('First import failed:', firstImportResult.message, firstImportResult.errors);
+                            console.log('Order data:', JSON.stringify(orderData, null, 2));
+                            console.log('Mock Excel data:', JSON.stringify(mockExcelData, null, 2));
+                        }
+                        expect(firstImportResult.success).toBe(true);
+                        expect(firstImportResult.duplicatesDetected).toBe(0);
+                        expect(firstImportResult.orderId).toBe(orderData.orderId);
+
+                        // Switch to second import mode
+                        isFirstImport = false;
+
+                        // Second import should detect duplicate and fail
+                        const secondImportResult = await agent.importOrders('test-file-id-2', orderData.platform);
+
+                        // Property assertions: Duplicate detection should work
+                        expect(secondImportResult.success).toBe(false);
+                        expect(secondImportResult.duplicatesDetected).toBe(1);
+                        expect(secondImportResult.itemsImported).toBe(0);
+                        expect(secondImportResult.message).toContain('检测到重复订单');
+                        expect(secondImportResult.message).toContain(orderData.orderId);
+                        expect(secondImportResult.errors).toContain(`Duplicate order detected: ${orderData.orderId}`);
+
+                        // Verify that createOrder was only called once (for the first import)
+                        expect(createOrderCallCount).toBe(1);
+                    }
+                ),
+                { numRuns: 100 }
+            );
+        });
+
+        /**
+         * **Feature: shopping-assistant-agents, Property 6: Multi-platform data standardization**
+         * **Validates: Requirements 4.1, 4.2, 4.3**
+         *
+         * For any order data from supported platforms, the system should convert it to a unified
+         * internal format and correctly update related records.
+         */
+        test('Property 6: Multi-platform data standardization', async () => {
+            await fc.assert(
+                fc.asyncProperty(
+                    // Generator for multi-platform order data
+                    fc.record({
+                        platform: fc.constantFrom('淘宝', '1688', '京东', '抖音商城', '中免日上', '拼多多'),
+                        orderData: fc.record({
+                            orderId: fc.stringOf(fc.char().filter(c => /[A-Z0-9]/.test(c)), { minLength: 8, maxLength: 20 })
+                                .filter(s => s.trim().length >= 8),
+                            storeName: fc.stringOf(fc.char().filter(c => /[a-zA-Z0-9\u4e00-\u9fff]/.test(c)), { minLength: 2, maxLength: 30 })
+                                .filter(s => s.trim().length >= 2),
+                            totalPrice: fc.float({ min: Math.fround(1.0), max: Math.fround(10000), noNaN: true }),
+                            items: fc.array(
+                                fc.record({
+                                    itemName: fc.stringOf(fc.char().filter(c => /[a-zA-Z0-9\u4e00-\u9fff]/.test(c)), { minLength: 2, maxLength: 50 })
+                                        .filter(s => s.trim().length >= 2),
+                                    quantity: fc.integer({ min: 1, max: 100 }),
+                                    unitPrice: fc.option(fc.float({ min: Math.fround(1.0), max: Math.fround(1000), noNaN: true }), { nil: undefined })
+                                }),
+                                { minLength: 1, maxLength: 5 }
+                            )
+                        })
+                    }),
+                    async (testData) => {
+                        // Mock file storage MCP to return platform-specific Excel data
+                        const mockExcelData = createMockExcelDataForPlatform(testData.platform, testData.orderData);
+
+                        (mockMCPManager.callTool as jest.Mock).mockImplementation((serverName: string, toolName: string, params: any) => {
+                            if (serverName === 'file-storage-server' && toolName === 'getFileMetadata') {
+                                return Promise.resolve({
+                                    success: true,
+                                    data: {
+                                        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                        originalName: `${testData.platform}_orders.xlsx`,
+                                    },
+                                });
+                            }
+
+                            if (serverName === 'file-storage-server' && toolName === 'parseExcelFile') {
+                                return Promise.resolve({
+                                    success: true,
+                                    data: mockExcelData,
+                                });
+                            }
+
+                            if (serverName === 'database-server' && toolName === 'getOrderDetails') {
+                                return Promise.resolve({
+                                    success: false,
+                                    error: { message: 'Order not found' },
+                                });
+                            }
+
+                            if (serverName === 'database-server' && toolName === 'createOrder') {
+                                return Promise.resolve({
+                                    success: true,
+                                    data: testData.orderData.orderId,
+                                });
+                            }
+
+                            return Promise.resolve({ success: false });
+                        });
+
+                        // Test the import process
+                        const result = await agent.importOrders('test-file-id', testData.platform);
+
+                        // Property assertions: Data should be successfully standardized
+                        if (!result.success) {
+                            console.log('Import failed:', result.message, result.errors);
+                            console.log('Test data:', JSON.stringify(testData, null, 2));
+                        }
+                        expect(result.success).toBe(true);
+                        expect(result.orderId).toBe(testData.orderData.orderId);
+                        expect(result.itemsImported).toBe(testData.orderData.items.length);
+                        expect(result.duplicatesDetected).toBe(0);
+
+                        // Verify that the normalized data maintains essential information
+                        expect(result.normalizedData).toBeDefined();
+                        expect(result.normalizedData?.platform).toBe(testData.platform);
+                        expect(result.normalizedData?.order.id).toBe(testData.orderData.orderId);
+                        expect(result.normalizedData?.order.store_name).toBe(testData.orderData.storeName);
+                        expect(result.normalizedData?.order.total_price).toBeCloseTo(testData.orderData.totalPrice, 2);
+                        expect(result.normalizedData?.order.purchase_channel).toBe(testData.platform);
+
+                        // Verify items are correctly normalized
+                        if (result.normalizedData?.order.items) {
+                            expect(result.normalizedData.order.items).toHaveLength(testData.orderData.items.length);
+
+                            result.normalizedData.order.items.forEach((normalizedItem, index) => {
+                                const originalItem = testData.orderData.items[index];
+                                expect(normalizedItem.item_name).toBe(originalItem.itemName);
+                                expect(normalizedItem.purchase_quantity).toBe(originalItem.quantity);
+                                if (originalItem.unitPrice !== undefined) {
+                                    expect(normalizedItem.unit_price).toBeCloseTo(originalItem.unitPrice, 2);
+                                }
+                            });
+                        }
+
+                        // Verify confidence score is reasonable
+                        expect(result.normalizedData?.confidence).toBeGreaterThan(0);
+                        expect(result.normalizedData?.confidence).toBeLessThanOrEqual(1);
+                    }
+                ),
+                { numRuns: 100 }
+            );
+        });
+    });
 });
+
+// Helper function to create mock Excel data for different platforms
+function createMockExcelDataForPlatform(platform: string, orderData: any): any {
+    const platformMappings: Record<string, { headers: string[], rowMapper: (data: any) => any[][] }> = {
+        '淘宝': {
+            headers: ['订单编号', '商品名称', '实付款', '交易状态', '成交时间', '卖家', '数量', '单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '交易成功',
+                        '2023-12-01 10:00:00',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        },
+        '1688': {
+            headers: ['订单号', '产品名称', '订单金额', '下单时间', '供应商', '采购数量', '单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '2023-12-01 10:00:00',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        },
+        '京东': {
+            headers: ['订单号', '商品名称', '订单金额', '下单时间', '商家', '数量', '单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '2023-12-01 10:00:00',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        },
+        '抖音商城': {
+            headers: ['订单编号', '商品标题', '实付金额', '下单时间', '店铺名称', '购买数量', '商品单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '2023-12-01 10:00:00',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        },
+        '中免日上': {
+            headers: ['订单号', '商品名称', '订单总额', '下单日期', '商户', '数量', '单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '2023-12-01',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        },
+        '拼多多': {
+            headers: ['订单编号', '商品名称', '实付金额', '订单状态', '成团时间', '店铺名称', '商品数量', '商品单价'],
+            rowMapper: (data) => {
+                const rows: any[][] = [];
+                for (const item of data.items) {
+                    rows.push([
+                        data.orderId,
+                        item.itemName,
+                        `¥${data.totalPrice}`,
+                        '已完成',
+                        '2023-12-01 10:00:00',
+                        data.storeName,
+                        item.quantity,
+                        item.unitPrice ? `¥${item.unitPrice}` : '¥99.00'
+                    ]);
+                }
+                return rows;
+            }
+        }
+    };
+
+    const mapping = platformMappings[platform];
+    if (!mapping) {
+        throw new Error(`Unsupported platform: ${platform}`);
+    }
+
+    const rows = mapping.rowMapper(orderData);
+
+    return {
+        sheets: [{
+            name: 'Sheet1',
+            headers: mapping.headers,
+            rows: rows,
+            detectedFormat: platform.toLowerCase(),
+        }],
+        metadata: {
+            fileName: `${platform}_orders.xlsx`,
+            totalRows: rows.length,
+            detectedPlatform: platform,
+            confidence: 0.9,
+        },
+    };
+}
