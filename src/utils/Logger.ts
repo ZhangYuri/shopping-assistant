@@ -3,7 +3,7 @@
  */
 
 import * as winston from 'winston';
-import { LogLevel, LogContext } from '@/types/common.types';
+import { LogLevel, LogContext } from '../types/common.types';
 
 export interface LoggerConfig {
     component: string;
