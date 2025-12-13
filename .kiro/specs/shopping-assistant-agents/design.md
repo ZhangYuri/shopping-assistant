@@ -285,9 +285,12 @@ interface DatabaseMCPTools {
   addInventoryItem(item: CreateInventoryItem): Promise<string>
   searchInventoryItems(criteria: SearchCriteria): Promise<InventoryItem[]>
 
-  // 订单相关操作
-  createOrder(order: CreateOrder): Promise<string>
+  // 订单相关操作 (支持主表+子表结构)
+  createOrder(order: CreateOrder): Promise<string> // 支持订单商品明细
   getOrderHistory(filters: OrderFilters): Promise<Order[]>
+  getOrderDetails(orderId: string): Promise<{order: Order, items: OrderItem[]}>
+  getOrderItems(orderId: string): Promise<OrderItem[]>
+  addOrderItems(orderId: string, items: CreateOrderItem[]): Promise<string[]>
   updateOrderStatus(orderId: string, status: string): Promise<boolean>
 
   // 购物清单操作
@@ -542,6 +545,54 @@ interface AgentMessage {
 ### 扩展的数据模型
 
 基于现有数据库设计，添加智能体系统和MCP集成所需的模型：
+
+#### 订单数据模型 (主表+子表结构)
+
+```typescript
+// 订单主表 (purchase_history)
+interface Order {
+  id: string
+  store_name: string
+  total_price?: number
+  delivery_cost?: number
+  pay_fee?: number
+  purchase_date?: Date
+  purchase_channel?: string
+  created_at: Date
+}
+
+// 订单商品明细 (purchase_sub_list)
+interface OrderItem {
+  id: number
+  parent_id: string
+  item_name: string
+  purchase_quantity: number
+  model?: string
+  unit_price?: number
+  category?: string
+  created_at: Date
+}
+
+// 创建订单时的数据结构
+interface CreateOrder {
+  id: string
+  store_name: string
+  total_price?: number
+  delivery_cost?: number
+  pay_fee?: number
+  purchase_date?: Date
+  purchase_channel?: string
+  items?: CreateOrderItem[] // 支持一个订单多个商品
+}
+
+interface CreateOrderItem {
+  item_name: string
+  purchase_quantity: number
+  model?: string
+  unit_price?: number
+  category?: string
+}
+```
 
 ```typescript
 interface AgentTask {

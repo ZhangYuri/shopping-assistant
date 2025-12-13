@@ -9,7 +9,6 @@ import { Logger } from '@/utils/Logger';
 // These will be implemented in subsequent tasks
 import { DatabaseMCPServer } from './servers/DatabaseMCPServer';
 import { FileStorageMCPServer } from './servers/FileStorageMCPServer';
-
 import { NotificationMCPServer } from './servers/NotificationMCPServer';
 
 export class MCPServerFactory {
@@ -33,8 +32,6 @@ export class MCPServerFactory {
 
             case 'file-storage':
                 return new FileStorageMCPServer(config);
-
-
 
             case 'notification':
                 return new NotificationMCPServer(config);
@@ -173,8 +170,6 @@ export class MCPServerFactory {
                     'file_metadata',
                 ];
 
-
-
             case 'notification':
                 return [
                     'notification_sending',
@@ -217,8 +212,6 @@ export class MCPServerFactory {
             errors.push(`File storage server missing required capabilities: ${missingCapabilities.join(', ')}`);
         }
     }
-
-
 
     private static validateNotificationConfig(config: MCPServerConfig, errors: string[]): void {
         // Notification-specific validation

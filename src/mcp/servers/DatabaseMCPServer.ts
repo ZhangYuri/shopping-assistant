@@ -60,6 +60,26 @@ interface CreateOrder {
     pay_fee?: number;
     purchase_date?: Date;
     purchase_channel?: string;
+    items?: CreateOrderItem[]; // 订单商品明细
+}
+
+interface OrderItem {
+    id: number;
+    parent_id: string;
+    item_name: string;
+    purchase_quantity: number;
+    model?: string;
+    unit_price?: number;
+    category?: string;
+    created_at: Date;
+}
+
+interface CreateOrderItem {
+    item_name: string;
+    purchase_quantity: number;
+    model?: string;
+    unit_price?: number;
+    category?: string;
 }
 
 interface ShoppingListItem {
@@ -171,7 +191,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
             database: this.connectionConfig.database,
             connectionLimit: this.connectionConfig.connectionLimit,
             multipleStatements: false,
-            timezone: '+00:00'
+            timezone: '+00:00',
         });
 
         this.logger.info('Database connection pool created');
@@ -240,6 +260,12 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 return this.createOrder(parameters.order) as T;
             case 'getOrderHistory':
                 return this.getOrderHistory(parameters.filters) as T;
+            case 'getOrderDetails':
+                return this.getOrderDetails(parameters.orderId) as T;
+            case 'getOrderItems':
+                return this.getOrderItems(parameters.orderId) as T;
+            case 'addOrderItems':
+                return this.addOrderItems(parameters.orderId, parameters.items) as T;
             case 'updateOrderStatus':
                 return this.updateOrderStatus(parameters.orderId, parameters.status) as T;
 
@@ -280,9 +306,9 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        itemName: { type: 'string', description: 'Name of the inventory item' }
+                        itemName: { type: 'string', description: 'Name of the inventory item' },
                     },
-                    required: ['itemName']
+                    required: ['itemName'],
                 },
                 outputSchema: {
                     type: 'object',
@@ -290,10 +316,10 @@ export class DatabaseMCPServer extends BaseMCPServer {
                         id: { type: 'number' },
                         item_name: { type: 'string' },
                         current_quantity: { type: 'number' },
-                        unit: { type: 'string' }
-                    }
+                        unit: { type: 'string' },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'updateInventoryQuantity',
@@ -302,14 +328,14 @@ export class DatabaseMCPServer extends BaseMCPServer {
                     type: 'object',
                     properties: {
                         itemId: { type: 'string', description: 'ID of the inventory item' },
-                        quantity: { type: 'number', description: 'New quantity' }
+                        quantity: { type: 'number', description: 'New quantity' },
                     },
-                    required: ['itemId', 'quantity']
+                    required: ['itemId', 'quantity'],
                 },
                 outputSchema: {
-                    type: 'boolean'
+                    type: 'boolean',
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'addInventoryItem',
@@ -327,17 +353,17 @@ export class DatabaseMCPServer extends BaseMCPServer {
                                 storage_location: { type: 'string' },
                                 production_date: { type: 'string', format: 'date' },
                                 expiry_date: { type: 'string', format: 'date' },
-                                warranty_period_days: { type: 'number' }
+                                warranty_period_days: { type: 'number' },
                             },
-                            required: ['item_name', 'current_quantity']
-                        }
+                            required: ['item_name', 'current_quantity'],
+                        },
                     },
-                    required: ['item']
+                    required: ['item'],
                 },
                 outputSchema: {
-                    type: 'string'
+                    type: 'string',
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'searchInventoryItems',
@@ -351,11 +377,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                                 category: { type: 'string' },
                                 item_name: { type: 'string' },
                                 low_stock_threshold: { type: 'number' },
-                                expiry_within_days: { type: 'number' }
-                            }
-                        }
+                                expiry_within_days: { type: 'number' },
+                            },
+                        },
                     },
-                    required: ['criteria']
+                    required: ['criteria'],
                 },
                 outputSchema: {
                     type: 'array',
@@ -364,17 +390,17 @@ export class DatabaseMCPServer extends BaseMCPServer {
                         properties: {
                             id: { type: 'number' },
                             item_name: { type: 'string' },
-                            current_quantity: { type: 'number' }
-                        }
-                    }
+                            current_quantity: { type: 'number' },
+                        },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
 
             // Order tools
             {
                 name: 'createOrder',
-                description: 'Create new purchase order',
+                description: 'Create new purchase order with items',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -387,17 +413,31 @@ export class DatabaseMCPServer extends BaseMCPServer {
                                 delivery_cost: { type: 'number' },
                                 pay_fee: { type: 'number' },
                                 purchase_date: { type: 'string', format: 'date-time' },
-                                purchase_channel: { type: 'string' }
+                                purchase_channel: { type: 'string' },
+                                items: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            item_name: { type: 'string' },
+                                            purchase_quantity: { type: 'number' },
+                                            model: { type: 'string' },
+                                            unit_price: { type: 'number' },
+                                            category: { type: 'string' },
+                                        },
+                                        required: ['item_name', 'purchase_quantity'],
+                                    },
+                                },
                             },
-                            required: ['id', 'store_name']
-                        }
+                            required: ['id', 'store_name'],
+                        },
                     },
-                    required: ['order']
+                    required: ['order'],
                 },
                 outputSchema: {
-                    type: 'string'
+                    type: 'string',
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'getOrderHistory',
@@ -413,11 +453,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                                 store_name: { type: 'string' },
                                 purchase_channel: { type: 'string' },
                                 min_amount: { type: 'number' },
-                                max_amount: { type: 'number' }
-                            }
-                        }
+                                max_amount: { type: 'number' },
+                            },
+                        },
                     },
-                    required: ['filters']
+                    required: ['filters'],
                 },
                 outputSchema: {
                     type: 'array',
@@ -427,11 +467,85 @@ export class DatabaseMCPServer extends BaseMCPServer {
                             id: { type: 'string' },
                             store_name: { type: 'string' },
                             total_price: { type: 'number' },
-                            purchase_date: { type: 'string' }
-                        }
-                    }
+                            purchase_date: { type: 'string' },
+                        },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
+            },
+            {
+                name: 'getOrderDetails',
+                description: 'Get complete order details including items',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        orderId: { type: 'string', description: 'Order ID' },
+                    },
+                    required: ['orderId'],
+                },
+                outputSchema: {
+                    type: 'object',
+                    properties: {
+                        order: { type: 'object' },
+                        items: { type: 'array' },
+                    },
+                },
+                serverName: this.config.serverName,
+            },
+            {
+                name: 'getOrderItems',
+                description: 'Get items for a specific order',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        orderId: { type: 'string', description: 'Order ID' },
+                    },
+                    required: ['orderId'],
+                },
+                outputSchema: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: { type: 'number' },
+                            item_name: { type: 'string' },
+                            purchase_quantity: { type: 'number' },
+                            unit_price: { type: 'number' },
+                            category: { type: 'string' },
+                        },
+                    },
+                },
+                serverName: this.config.serverName,
+            },
+            {
+                name: 'addOrderItems',
+                description: 'Add items to an existing order',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        orderId: { type: 'string', description: 'Order ID' },
+                        items: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    item_name: { type: 'string' },
+                                    purchase_quantity: { type: 'number' },
+                                    model: { type: 'string' },
+                                    unit_price: { type: 'number' },
+                                    category: { type: 'string' },
+                                },
+                                required: ['item_name', 'purchase_quantity'],
+                            },
+                        },
+                    },
+                    required: ['orderId', 'items'],
+                },
+                outputSchema: {
+                    type: 'array',
+                    items: { type: 'string' },
+                },
+                serverName: this.config.serverName,
             },
 
             // Shopping list tools
@@ -440,7 +554,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 description: 'Get current shopping list',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {},
                 },
                 outputSchema: {
                     type: 'array',
@@ -451,11 +565,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                             item_name: { type: 'string' },
                             suggested_quantity: { type: 'number' },
                             priority: { type: 'number' },
-                            status: { type: 'string' }
-                        }
-                    }
+                            status: { type: 'string' },
+                        },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'addToShoppingList',
@@ -470,17 +584,17 @@ export class DatabaseMCPServer extends BaseMCPServer {
                                 suggested_quantity: { type: 'number' },
                                 priority: { type: 'number' },
                                 status: { type: 'string' },
-                                reason: { type: 'string' }
+                                reason: { type: 'string' },
                             },
-                            required: ['item_name']
-                        }
+                            required: ['item_name'],
+                        },
                     },
-                    required: ['item']
+                    required: ['item'],
                 },
                 outputSchema: {
-                    type: 'string'
+                    type: 'string',
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
 
             // Financial analysis tools
@@ -494,12 +608,12 @@ export class DatabaseMCPServer extends BaseMCPServer {
                             type: 'object',
                             properties: {
                                 start_date: { type: 'string', format: 'date' },
-                                end_date: { type: 'string', format: 'date' }
+                                end_date: { type: 'string', format: 'date' },
                             },
-                            required: ['start_date', 'end_date']
-                        }
+                            required: ['start_date', 'end_date'],
+                        },
                     },
-                    required: ['dateRange']
+                    required: ['dateRange'],
                 },
                 outputSchema: {
                     type: 'array',
@@ -508,11 +622,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                         properties: {
                             category: { type: 'string' },
                             total_amount: { type: 'number' },
-                            item_count: { type: 'number' }
-                        }
-                    }
+                            item_count: { type: 'number' },
+                        },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'getMonthlyReport',
@@ -520,9 +634,9 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        month: { type: 'string', description: 'Month in YYYY-MM format' }
+                        month: { type: 'string', description: 'Month in YYYY-MM format' },
                     },
-                    required: ['month']
+                    required: ['month'],
                 },
                 outputSchema: {
                     type: 'object',
@@ -530,10 +644,10 @@ export class DatabaseMCPServer extends BaseMCPServer {
                         month: { type: 'string' },
                         total_spending: { type: 'number' },
                         total_orders: { type: 'number' },
-                        categories: { type: 'array' }
-                    }
+                        categories: { type: 'array' },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'detectAnomalousSpending',
@@ -541,9 +655,9 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        threshold: { type: 'number', description: 'Anomaly detection threshold' }
+                        threshold: { type: 'number', description: 'Anomaly detection threshold' },
                     },
-                    required: ['threshold']
+                    required: ['threshold'],
                 },
                 outputSchema: {
                     type: 'array',
@@ -552,11 +666,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                         properties: {
                             order_id: { type: 'string' },
                             anomaly_score: { type: 'number' },
-                            reason: { type: 'string' }
-                        }
-                    }
+                            reason: { type: 'string' },
+                        },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
 
             // Generic tools
@@ -567,18 +681,18 @@ export class DatabaseMCPServer extends BaseMCPServer {
                     type: 'object',
                     properties: {
                         sql: { type: 'string', description: 'SQL query to execute' },
-                        params: { type: 'array', description: 'Query parameters' }
+                        params: { type: 'array', description: 'Query parameters' },
                     },
-                    required: ['sql', 'params']
+                    required: ['sql', 'params'],
                 },
                 outputSchema: {
                     type: 'object',
                     properties: {
                         rows: { type: 'array' },
-                        affectedRows: { type: 'number' }
-                    }
+                        affectedRows: { type: 'number' },
+                    },
                 },
-                serverName: this.config.serverName
+                serverName: this.config.serverName,
             },
             {
                 name: 'executeTransaction',
@@ -591,35 +705,37 @@ export class DatabaseMCPServer extends BaseMCPServer {
                             items: {
                                 type: 'object',
                                 properties: {
-                                    type: { type: 'string', enum: ['insert', 'update', 'delete', 'select'] },
+                                    type: {
+                                        type: 'string',
+                                        enum: ['insert', 'update', 'delete', 'select'],
+                                    },
                                     table: { type: 'string' },
                                     data: { type: 'object' },
                                     where: { type: 'object' },
                                     sql: { type: 'string' },
-                                    params: { type: 'array' }
-                                }
-                            }
-                        }
+                                    params: { type: 'array' },
+                                },
+                            },
+                        },
                     },
-                    required: ['operations']
+                    required: ['operations'],
                 },
                 outputSchema: {
                     type: 'object',
                     properties: {
                         success: { type: 'boolean' },
-                        results: { type: 'array' }
-                    }
+                        results: { type: 'array' },
+                    },
                 },
-                serverName: this.config.serverName
-            }
+                serverName: this.config.serverName,
+            },
         ];
     }
     // Inventory operations
     private async getInventoryItem(itemName: string): Promise<InventoryItem | null> {
-        const [rows] = await this.pool!.execute(
-            'SELECT * FROM inventory WHERE item_name = ?',
-            [itemName]
-        );
+        const [rows] = await this.pool!.execute('SELECT * FROM inventory WHERE item_name = ?', [
+            itemName,
+        ]);
 
         const items = rows as InventoryItem[];
         return items.length > 0 ? items[0] : null;
@@ -638,8 +754,8 @@ export class DatabaseMCPServer extends BaseMCPServer {
     private async addInventoryItem(item: CreateInventoryItem): Promise<string> {
         const [result] = await this.pool!.execute(
             `INSERT INTO inventory (item_name, category, current_quantity, unit, storage_location,
-             production_date, expiry_date, warranty_period_days)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            production_date, expiry_date, warranty_period_days)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 item.item_name,
                 item.category || null,
@@ -648,7 +764,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 item.storage_location || null,
                 item.production_date || null,
                 item.expiry_date || null,
-                item.warranty_period_days || 0
+                item.warranty_period_days || 0,
             ]
         );
 
@@ -688,21 +804,52 @@ export class DatabaseMCPServer extends BaseMCPServer {
 
     // Order operations
     private async createOrder(order: CreateOrder): Promise<string> {
-        await this.pool!.execute(
-            `INSERT INTO purchase_history (id, store_name, total_price, delivery_cost, pay_fee,
-             purchase_date, purchase_channel) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-                order.id,
-                order.store_name,
-                order.total_price || null,
-                order.delivery_cost || null,
-                order.pay_fee || null,
-                order.purchase_date || null,
-                order.purchase_channel || null
-            ]
-        );
+        const connection = await this.pool!.getConnection();
 
-        return order.id;
+        try {
+            await connection.beginTransaction();
+
+            // 插入订单主表
+            await connection.execute(
+                `INSERT INTO purchase_history (id, store_name, total_price, delivery_cost, pay_fee,
+                purchase_date, purchase_channel) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    order.id,
+                    order.store_name,
+                    order.total_price || null,
+                    order.delivery_cost || null,
+                    order.pay_fee || null,
+                    order.purchase_date || null,
+                    order.purchase_channel || null,
+                ]
+            );
+
+            // 插入订单商品明细
+            if (order.items && order.items.length > 0) {
+                for (const item of order.items) {
+                    await connection.execute(
+                        `INSERT INTO purchase_sub_list (parent_id, item_name, purchase_quantity, model, unit_price, category)
+                        VALUES (?, ?, ?, ?, ?, ?)`,
+                        [
+                            order.id,
+                            item.item_name,
+                            item.purchase_quantity,
+                            item.model || null,
+                            item.unit_price || null,
+                            item.category || null,
+                        ]
+                    );
+                }
+            }
+
+            await connection.commit();
+            return order.id;
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
     }
 
     private async getOrderHistory(filters: OrderFilters): Promise<Order[]> {
@@ -745,12 +892,66 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return rows as Order[];
     }
 
+    private async getOrderDetails(orderId: string): Promise<{ order: Order; items: OrderItem[] }> {
+        // 获取订单主表信息
+        const [orderRows] = await this.pool!.execute(
+            'SELECT * FROM purchase_history WHERE id = ?',
+            [orderId]
+        );
+
+        const orders = orderRows as Order[];
+        if (orders.length === 0) {
+            throw new Error(`Order not found: ${orderId}`);
+        }
+
+        // 获取订单商品明细
+        const items = await this.getOrderItems(orderId);
+
+        return {
+            order: orders[0],
+            items,
+        };
+    }
+
+    private async getOrderItems(orderId: string): Promise<OrderItem[]> {
+        const [rows] = await this.pool!.execute(
+            'SELECT * FROM purchase_sub_list WHERE parent_id = ? ORDER BY id',
+            [orderId]
+        );
+
+        return rows as OrderItem[];
+    }
+
+    private async addOrderItems(orderId: string, items: CreateOrderItem[]): Promise<string[]> {
+        const insertedIds: string[] = [];
+
+        for (const item of items) {
+            const [result] = await this.pool!.execute(
+                `INSERT INTO purchase_sub_list (parent_id, item_name, purchase_quantity, model, unit_price, category)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+                [
+                    orderId,
+                    item.item_name,
+                    item.purchase_quantity,
+                    item.model || null,
+                    item.unit_price || null,
+                    item.category || null,
+                ]
+            );
+
+            const insertResult = result as mysql.ResultSetHeader;
+            insertedIds.push(insertResult.insertId.toString());
+        }
+
+        return insertedIds;
+    }
+
     private async updateOrderStatus(orderId: string, status: string): Promise<boolean> {
         // Note: The current schema doesn't have a status field in purchase_history
         // This is a placeholder implementation that could be extended
         this.logger.warn('Order status update not implemented - schema missing status field', {
             orderId,
-            status
+            status,
         });
         return true;
     }
@@ -767,13 +968,13 @@ export class DatabaseMCPServer extends BaseMCPServer {
     private async addToShoppingList(item: CreateShoppingListItem): Promise<string> {
         const [result] = await this.pool!.execute(
             `INSERT INTO shopping_list (item_name, suggested_quantity, priority, status, reason)
-             VALUES (?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?)`,
             [
                 item.item_name,
                 item.suggested_quantity || null,
                 item.priority || 1,
                 item.status || 'pending',
-                item.reason || null
+                item.reason || null,
             ]
         );
 
@@ -781,7 +982,10 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return insertResult.insertId.toString();
     }
 
-    private async updateShoppingListItem(id: string, updates: Partial<ShoppingListItem>): Promise<boolean> {
+    private async updateShoppingListItem(
+        id: string,
+        updates: Partial<ShoppingListItem>
+    ): Promise<boolean> {
         const fields: string[] = [];
         const params: any[] = [];
 
@@ -796,7 +1000,9 @@ export class DatabaseMCPServer extends BaseMCPServer {
             return false;
         }
 
-        fields.push('completed_date = CASE WHEN status = "completed" THEN CURRENT_TIMESTAMP ELSE completed_date END');
+        fields.push(
+            'completed_date = CASE WHEN status = "completed" THEN CURRENT_TIMESTAMP ELSE completed_date END'
+        );
         params.push(id);
 
         const [result] = await this.pool!.execute(
@@ -809,10 +1015,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
     }
 
     private async removeFromShoppingList(id: string): Promise<boolean> {
-        const [result] = await this.pool!.execute(
-            'DELETE FROM shopping_list WHERE id = ?',
-            [id]
-        );
+        const [result] = await this.pool!.execute('DELETE FROM shopping_list WHERE id = ?', [id]);
 
         const deleteResult = result as mysql.ResultSetHeader;
         return deleteResult.affectedRows > 0;
@@ -825,12 +1028,12 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 SUM(psl.unit_price * psl.purchase_quantity) as total_amount,
                 COUNT(*) as item_count,
                 AVG(psl.unit_price) as avg_price
-             FROM purchase_sub_list psl
-             JOIN purchase_history ph ON psl.parent_id = ph.id
-             WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
-             AND psl.category IS NOT NULL
-             GROUP BY psl.category
-             ORDER BY total_amount DESC`,
+            FROM purchase_sub_list psl
+            JOIN purchase_history ph ON psl.parent_id = ph.id
+            WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+            AND psl.category IS NOT NULL
+            GROUP BY psl.category
+            ORDER BY total_amount DESC`,
             [dateRange.start_date, dateRange.end_date]
         );
 
@@ -846,8 +1049,8 @@ export class DatabaseMCPServer extends BaseMCPServer {
             `SELECT
                 SUM(total_price) as total_spending,
                 COUNT(*) as total_orders
-             FROM purchase_history
-             WHERE DATE_FORMAT(purchase_date, '%Y-%m') = ?`,
+            FROM purchase_history
+            WHERE DATE_FORMAT(purchase_date, '%Y-%m') = ?`,
             [month]
         );
 
@@ -856,7 +1059,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
         // Get category breakdown
         const categories = await this.getSpendingByCategory({
             start_date: new Date(startDate),
-            end_date: new Date(endDate)
+            end_date: new Date(endDate),
         });
 
         // Get top stores
@@ -865,11 +1068,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
                 store_name,
                 SUM(total_price) as total_amount,
                 COUNT(*) as order_count
-             FROM purchase_history
-             WHERE DATE_FORMAT(purchase_date, '%Y-%m') = ?
-             GROUP BY store_name
-             ORDER BY total_amount DESC
-             LIMIT 10`,
+            FROM purchase_history
+            WHERE DATE_FORMAT(purchase_date, '%Y-%m') = ?
+            GROUP BY store_name
+            ORDER BY total_amount DESC
+            LIMIT 10`,
             [month]
         );
 
@@ -878,7 +1081,11 @@ export class DatabaseMCPServer extends BaseMCPServer {
             total_spending: totalData.total_spending || 0,
             total_orders: totalData.total_orders || 0,
             categories,
-            top_stores: stores as Array<{ store_name: string; total_amount: number; order_count: number }>
+            top_stores: stores as Array<{
+                store_name: string;
+                total_amount: number;
+                order_count: number;
+            }>,
         };
     }
 
@@ -896,16 +1103,16 @@ export class DatabaseMCPServer extends BaseMCPServer {
                     WHEN total_price < avg_price - (? * stddev_price) THEN 'Unusually low spending'
                     ELSE 'Normal spending'
                 END as reason
-             FROM (
+            FROM (
                 SELECT *,
                     AVG(total_price) OVER() as avg_price,
                     STDDEV(total_price) OVER() as stddev_price
                 FROM purchase_history
                 WHERE total_price IS NOT NULL
                 AND purchase_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-             ) t
-             WHERE ABS((total_price - avg_price) / stddev_price) > ?
-             ORDER BY ABS(anomaly_score) DESC`,
+            ) t
+            WHERE ABS((total_price - avg_price) / stddev_price) > ?
+            ORDER BY ABS(anomaly_score) DESC`,
             [threshold, threshold, threshold]
         );
 
@@ -920,7 +1127,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
             rows: rows as any[],
             fields: fields as mysql.FieldPacket[],
             affectedRows: (rows as any).affectedRows,
-            insertId: (rows as any).insertId
+            insertId: (rows as any).insertId,
         };
     }
 
@@ -965,16 +1172,15 @@ export class DatabaseMCPServer extends BaseMCPServer {
 
             return {
                 success: true,
-                results
+                results,
             };
-
         } catch (error) {
             await connection.rollback();
 
             return {
                 success: false,
                 results: [],
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
             };
         } finally {
             connection.release();
@@ -982,7 +1188,10 @@ export class DatabaseMCPServer extends BaseMCPServer {
     }
 
     // Helper methods for transaction operations
-    private async generateInsertQuery(connection: mysql.PoolConnection, operation: DatabaseOperation): Promise<any> {
+    private async generateInsertQuery(
+        connection: mysql.PoolConnection,
+        operation: DatabaseOperation
+    ): Promise<any> {
         const fields = Object.keys(operation.data!);
         const values = Object.values(operation.data!);
         const placeholders = fields.map(() => '?').join(', ');
@@ -993,11 +1202,18 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return result;
     }
 
-    private async generateUpdateQuery(connection: mysql.PoolConnection, operation: DatabaseOperation): Promise<any> {
-        const setFields = Object.keys(operation.data!).map(field => `${field} = ?`).join(', ');
+    private async generateUpdateQuery(
+        connection: mysql.PoolConnection,
+        operation: DatabaseOperation
+    ): Promise<any> {
+        const setFields = Object.keys(operation.data!)
+            .map(field => `${field} = ?`)
+            .join(', ');
         const setValues = Object.values(operation.data!);
 
-        const whereFields = Object.keys(operation.where!).map(field => `${field} = ?`).join(' AND ');
+        const whereFields = Object.keys(operation.where!)
+            .map(field => `${field} = ?`)
+            .join(' AND ');
         const whereValues = Object.values(operation.where!);
 
         const sql = `UPDATE ${operation.table} SET ${setFields} WHERE ${whereFields}`;
@@ -1006,8 +1222,13 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return result;
     }
 
-    private async generateDeleteQuery(connection: mysql.PoolConnection, operation: DatabaseOperation): Promise<any> {
-        const whereFields = Object.keys(operation.where!).map(field => `${field} = ?`).join(' AND ');
+    private async generateDeleteQuery(
+        connection: mysql.PoolConnection,
+        operation: DatabaseOperation
+    ): Promise<any> {
+        const whereFields = Object.keys(operation.where!)
+            .map(field => `${field} = ?`)
+            .join(' AND ');
         const whereValues = Object.values(operation.where!);
 
         const sql = `DELETE FROM ${operation.table} WHERE ${whereFields}`;
@@ -1016,12 +1237,17 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return result;
     }
 
-    private async generateSelectQuery(connection: mysql.PoolConnection, operation: DatabaseOperation): Promise<any> {
+    private async generateSelectQuery(
+        connection: mysql.PoolConnection,
+        operation: DatabaseOperation
+    ): Promise<any> {
         let sql = `SELECT * FROM ${operation.table}`;
         let params: any[] = [];
 
         if (operation.where && Object.keys(operation.where).length > 0) {
-            const whereFields = Object.keys(operation.where).map(field => `${field} = ?`).join(' AND ');
+            const whereFields = Object.keys(operation.where)
+                .map(field => `${field} = ?`)
+                .join(' AND ');
             const whereValues = Object.values(operation.where);
 
             sql += ` WHERE ${whereFields}`;
@@ -1043,7 +1269,7 @@ export class DatabaseMCPServer extends BaseMCPServer {
             password: url.password,
             database: url.pathname.slice(1), // Remove leading slash
             connectionLimit: 10,
-            timeout: 60000
+            timeout: 60000,
         };
     }
 }
