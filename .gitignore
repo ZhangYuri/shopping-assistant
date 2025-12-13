@@ -102,6 +102,10 @@ uploads/
 test-results/
 playwright-report/
 
+# Tesseract OCR training data files (large binary files)
+*.traineddata
+
+# Project specific files
 images/
 files/
 执行计划.md

@@ -63,7 +63,7 @@ src/
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - TypeScript 5+
 - PostgreSQL (for database MCP server)
 - Redis (for cache MCP server)
@@ -83,16 +83,28 @@ npm install
 
 3. Set up environment variables:
 ```bash
+# Option 1: Interactive setup (recommended)
+npm run setup:env
+
+# Option 2: Manual setup
 cp .env.example .env
 # Edit .env with your configuration
+
+# Verify configuration
+npm run check:env
 ```
 
-4. Build the project:
+4. Set up OCR training data:
+```bash
+npm run setup:ocr
+```
+
+5. Build the project:
 ```bash
 npm run build
 ```
 
-5. Run tests:
+6. Run tests:
 ```bash
 npm test
 ```

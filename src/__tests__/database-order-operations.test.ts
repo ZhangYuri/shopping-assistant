@@ -9,10 +9,19 @@ describe('DatabaseMCPServer Order Operations', () => {
     let server: DatabaseMCPServer;
 
     beforeAll(async () => {
+        // 设置测试环境变量（如果没有设置的话）
+        if (!process.env.DATABASE_HOST) {
+            process.env.DATABASE_HOST = 'localhost';
+            process.env.DATABASE_PORT = '3306';
+            process.env.DATABASE_USER = 'test';
+            process.env.DATABASE_PASSWORD = 'test';
+            process.env.DATABASE_NAME = 'test_db';
+        }
+
         const config: MCPServerConfig = {
             serverName: 'test-database',
             serverType: 'database',
-            connectionString: 'mysql://test:test@localhost:3306/test_db',
+            connectionString: '', // 不再使用，保留为了兼容性
             capabilities: ['order_operations'],
             retryPolicy: {
                 maxRetries: 3,

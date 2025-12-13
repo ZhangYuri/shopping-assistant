@@ -15,7 +15,7 @@ describe('MCP Infrastructure', () => {
             const validConfig: MCPServerConfig = {
                 serverName: 'test-server',
                 serverType: 'database',
-                connectionString: 'mysql://localhost:3306/test',
+                connectionString: '', // 不再使用，保留为了兼容性
                 capabilities: ['inventory_operations', 'order_operations'],
                 retryPolicy: {
                     maxRetries: 3,
@@ -55,12 +55,12 @@ describe('MCP Infrastructure', () => {
             const config = MCPServerFactory.createDefaultConfig(
                 'test-server',
                 'database',
-                'mysql://localhost:3306/test'
+                '' // 不再使用连接字符串，使用环境变量
             );
 
             expect(config.serverName).toBe('test-server');
             expect(config.serverType).toBe('database');
-            expect(config.connectionString).toBe('mysql://localhost:3306/test');
+            expect(config.connectionString).toBe('');
             expect(config.capabilities.length).toBeGreaterThan(0);
             expect(config.retryPolicy).toBeDefined();
             expect(config.timeout).toBeGreaterThan(0);
@@ -207,10 +207,17 @@ describe('MCP Infrastructure', () => {
 
     describe('DatabaseMCPServer', () => {
         test('should instantiate with valid configuration', () => {
+            // 设置测试环境变量
+            process.env.DATABASE_HOST = 'localhost';
+            process.env.DATABASE_PORT = '3306';
+            process.env.DATABASE_USER = 'testuser';
+            process.env.DATABASE_PASSWORD = 'testpass';
+            process.env.DATABASE_NAME = 'testdb';
+
             const config: MCPServerConfig = {
                 serverName: 'test-database',
                 serverType: 'database',
-                connectionString: 'mysql://testuser:testpass@localhost:3306/testdb',
+                connectionString: '', // 不再使用，保留为了兼容性
                 capabilities: ['inventory_operations', 'order_operations'],
                 retryPolicy: {
                     maxRetries: 3,
@@ -228,10 +235,17 @@ describe('MCP Infrastructure', () => {
         });
 
         test('should provide available tools', async () => {
+            // 设置测试环境变量
+            process.env.DATABASE_HOST = 'localhost';
+            process.env.DATABASE_PORT = '3306';
+            process.env.DATABASE_USER = 'testuser';
+            process.env.DATABASE_PASSWORD = 'testpass';
+            process.env.DATABASE_NAME = 'testdb';
+
             const config: MCPServerConfig = {
                 serverName: 'test-database',
                 serverType: 'database',
-                connectionString: 'mysql://testuser:testpass@localhost:3306/testdb',
+                connectionString: '', // 不再使用，保留为了兼容性
                 capabilities: ['inventory_operations', 'order_operations'],
                 retryPolicy: {
                     maxRetries: 3,
@@ -273,10 +287,17 @@ describe('MCP Infrastructure', () => {
         });
 
         test('should have proper tool schemas', async () => {
+            // 设置测试环境变量
+            process.env.DATABASE_HOST = 'localhost';
+            process.env.DATABASE_PORT = '3306';
+            process.env.DATABASE_USER = 'testuser';
+            process.env.DATABASE_PASSWORD = 'testpass';
+            process.env.DATABASE_NAME = 'testdb';
+
             const config: MCPServerConfig = {
                 serverName: 'test-database',
                 serverType: 'database',
-                connectionString: 'mysql://testuser:testpass@localhost:3306/testdb',
+                connectionString: '', // 不再使用，保留为了兼容性
                 capabilities: ['inventory_operations', 'order_operations'],
                 retryPolicy: {
                     maxRetries: 3,

@@ -5,16 +5,9 @@
 import mysql from 'mysql2/promise';
 import { BaseMCPServer } from '../base/BaseMCPServer';
 import { MCPServerConfig, MCPToolDefinition } from '@/types/mcp.types';
+import { getDatabaseConfig, validateDatabaseConfig, getDatabaseConnectionString, type DatabaseConfig } from '@/config/database.config';
 
-interface DatabaseConnectionConfig {
-    host: string;
-    port: number;
-    user: string;
-    password: string;
-    database: string;
-    connectionLimit: number;
-    timeout: number;
-}
+// DatabaseConnectionConfig 已移动到 @/config/database.config.ts
 
 interface InventoryItem {
     id: number;
@@ -170,13 +163,23 @@ interface QueryResult {
 
 export class DatabaseMCPServer extends BaseMCPServer {
     private pool?: mysql.Pool;
-    private connectionConfig: DatabaseConnectionConfig;
+    private connectionConfig: DatabaseConfig;
 
     constructor(config: MCPServerConfig) {
         super(config);
 
-        // Parse connection string to extract database configuration
-        this.connectionConfig = this.parseConnectionString(config.connectionString);
+        // 从环境变量获取数据库配置，而不是从连接字符串解析
+        this.connectionConfig = getDatabaseConfig();
+
+        // 验证配置
+        const validation = validateDatabaseConfig(this.connectionConfig);
+        if (!validation.isValid) {
+            throw new Error(`Invalid database configuration: ${validation.errors.join(', ')}`);
+        }
+
+        this.logger.info('Database configuration loaded', {
+            connectionString: getDatabaseConnectionString(this.connectionConfig, true) // 隐藏密码
+        });
     }
 
     protected async onInitialize(): Promise<void> {
@@ -1258,18 +1261,5 @@ export class DatabaseMCPServer extends BaseMCPServer {
         return rows;
     }
 
-    private parseConnectionString(connectionString: string): DatabaseConnectionConfig {
-        // Parse MySQL connection string format: mysql://user:password@host:port/database
-        const url = new URL(connectionString);
-
-        return {
-            host: url.hostname,
-            port: parseInt(url.port) || 3306,
-            user: url.username,
-            password: url.password,
-            database: url.pathname.slice(1), // Remove leading slash
-            connectionLimit: 10,
-            timeout: 60000,
-        };
-    }
+    // parseConnectionString 方法已移除 - 现在使用环境变量配置
 }
