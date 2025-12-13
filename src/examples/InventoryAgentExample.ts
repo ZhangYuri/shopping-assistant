@@ -16,8 +16,8 @@ export class InventoryAgentExample {
         this.mcpManager = new MCPManager({
             registry: {
                 healthCheckInterval: 30000,
-                maxRetries: 3,
-                retryDelay: 1000,
+                maxConcurrentCalls: 10,
+                defaultTimeout: 5000,
             },
             autoStart: true,
             configValidation: true,

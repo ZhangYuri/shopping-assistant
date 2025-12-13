@@ -67,7 +67,7 @@ describe('Image Quantity Detection Tests', () => {
             };
 
             // 测试数量识别的不确定性处理
-            const quantityAnalysis = this.analyzeQuantityFromImage(mockImageAnalysis);
+            const quantityAnalysis = analyzeQuantityFromImage(mockImageAnalysis);
 
             expect(quantityAnalysis).toEqual({
                 bestEstimate: 5,
@@ -114,7 +114,7 @@ describe('Image Quantity Detection Tests', () => {
                 ]
             };
 
-            const quantityAnalysis = this.analyzeQuantityFromImage(mockToothpasteAnalysis);
+            const quantityAnalysis = analyzeQuantityFromImage(mockToothpasteAnalysis);
 
             expect(quantityAnalysis).toEqual({
                 bestEstimate: 2,
@@ -157,7 +157,7 @@ describe('Image Quantity Detection Tests', () => {
                 ]
             };
 
-            const quantityAnalysis = this.analyzeQuantityFromImage(mockConflictingAnalysis);
+            const quantityAnalysis = analyzeQuantityFromImage(mockConflictingAnalysis);
 
             expect(quantityAnalysis).toEqual({
                 bestEstimate: 3, // 优先相信OCR
@@ -198,86 +198,87 @@ describe('Image Quantity Detection Tests', () => {
             ];
 
             scenarios.forEach(scenario => {
-                const prompt = this.generateConfirmationPrompt(scenario.analysis);
+                const prompt = generateConfirmationPrompt(scenario.analysis);
                 expect(prompt).toContain('数量');
                 expect(prompt).toContain('确认');
             });
         });
     });
 
-    // 辅助方法：分析图像中的数量信息
-    private analyzeQuantityFromImage(imageAnalysis: any) {
+});
+
+// 辅助方法：分析图像中的数量信息
+function analyzeQuantityFromImage(imageAnalysis: any) {
     const { quantityHints } = imageAnalysis;
 
-    if(!quantityHints || quantityHints.length === 0) {
+    if (!quantityHints || quantityHints.length === 0) {
+        return {
+            bestEstimate: null,
+            confidence: 0.0,
+            method: 'none',
+            alternatives: [],
+            requiresUserConfirmation: true,
+            suggestedPrompt: '无法自动识别数量，请手动输入商品数量'
+        };
+    }
+
+    // 按置信度排序
+    const sortedHints = quantityHints
+        .filter((hint: any) => hint.estimatedCount !== null)
+        .sort((a: any, b: any) => b.confidence - a.confidence);
+
+    if (sortedHints.length === 0) {
+        return {
+            bestEstimate: null,
+            confidence: 0.0,
+            method: 'none',
+            alternatives: [],
+            requiresUserConfirmation: true,
+            suggestedPrompt: '无法自动识别数量，请手动输入商品数量'
+        };
+    }
+
+    const best = sortedHints[0];
+    const alternatives = sortedHints.slice(1);
+
+    // 检查是否有冲突
+    const hasConflict = alternatives.some((alt: any) =>
+        alt.estimatedCount !== best.estimatedCount && alt.confidence > 0.7
+    );
+
+    // 决定是否需要用户确认
+    const requiresConfirmation = best.confidence < 0.8 || hasConflict;
+
+    let suggestedPrompt = null;
+    if (requiresConfirmation) {
+        if (hasConflict) {
+            const conflictingAlt = alternatives.find((alt: any) =>
+                alt.estimatedCount !== best.estimatedCount && alt.confidence > 0.7
+            );
+            suggestedPrompt = `${best.method === 'ocr_text' ? '文字显示' : '视觉识别'}${best.estimatedCount}个，但${conflictingAlt.method === 'visual_counting' ? '视觉识别' : '其他方法'}为${conflictingAlt.estimatedCount}个，请确认实际数量`;
+        } else {
+            suggestedPrompt = `检测到商品，估计数量为${best.estimatedCount}个，${best.confidence < 0.8 ? '置信度较低，' : ''}请确认实际数量`;
+        }
+    }
+
     return {
-        bestEstimate: null,
-        confidence: 0.0,
-        method: 'none',
-        alternatives: [],
-        requiresUserConfirmation: true,
-        suggestedPrompt: '无法自动识别数量，请手动输入商品数量'
+        bestEstimate: best.estimatedCount,
+        confidence: best.confidence,
+        method: best.method,
+        alternatives: alternatives.map((alt: any) => ({
+            count: alt.estimatedCount,
+            method: alt.method,
+            confidence: alt.confidence
+        })),
+        requiresUserConfirmation: requiresConfirmation,
+        suggestedPrompt
     };
 }
 
-// 按置信度排序
-const sortedHints = quantityHints
-    .filter((hint: any) => hint.estimatedCount !== null)
-    .sort((a: any, b: any) => b.confidence - a.confidence);
-
-if (sortedHints.length === 0) {
-    return {
-        bestEstimate: null,
-        confidence: 0.0,
-        method: 'none',
-        alternatives: [],
-        requiresUserConfirmation: true,
-        suggestedPrompt: '无法自动识别数量，请手动输入商品数量'
-    };
-}
-
-const best = sortedHints[0];
-const alternatives = sortedHints.slice(1);
-
-// 检查是否有冲突
-const hasConflict = alternatives.some((alt: any) =>
-    alt.estimatedCount !== best.estimatedCount && alt.confidence > 0.7
-);
-
-// 决定是否需要用户确认
-const requiresConfirmation = best.confidence < 0.8 || hasConflict;
-
-let suggestedPrompt = null;
-if (requiresConfirmation) {
-    if (hasConflict) {
-        const conflictingAlt = alternatives.find((alt: any) =>
-            alt.estimatedCount !== best.estimatedCount && alt.confidence > 0.7
-        );
-        suggestedPrompt = `${best.method === 'ocr_text' ? '文字显示' : '视觉识别'}${best.estimatedCount}个，但${conflictingAlt.method === 'visual_counting' ? '视觉识别' : '其他方法'}为${conflictingAlt.estimatedCount}个，请确认实际数量`;
-    } else {
-        suggestedPrompt = `检测到商品，估计数量为${best.estimatedCount}个，${best.confidence < 0.8 ? '置信度较低，' : ''}请确认实际数量`;
-    }
-}
-
-return {
-    bestEstimate: best.estimatedCount,
-    confidence: best.confidence,
-    method: best.method,
-    alternatives: alternatives.map((alt: any) => ({
-        count: alt.estimatedCount,
-        method: alt.method,
-        confidence: alt.confidence
-    })),
-    requiresUserConfirmation: requiresConfirmation,
-    suggestedPrompt
-};
-    }
-
-    // 辅助方法：生成确认提示
-    private generateConfirmationPrompt(analysis: any) {
+// 辅助方法：生成确认提示
+function generateConfirmationPrompt(analysis: any) {
     if (analysis.suggestedPrompt) {
         return analysis.suggestedPrompt;
     }
     return '请确认商品数量';
 }
-});
