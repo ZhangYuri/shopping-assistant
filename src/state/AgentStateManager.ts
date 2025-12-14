@@ -104,9 +104,14 @@ export class AgentStateManager {
                 state.history = state.history.slice(-this.config.maxConversationHistory);
             }
 
-            // Store conversation state using MemorySaver
+            // Store conversation state using MemorySaver with proper checkpoint format
             const config = { configurable: { thread_id: conversationId } };
-            const checkpoint = { data: state };
+            const checkpoint = {
+                channel_values: { conversation_state: state },
+                channel_versions: { conversation_state: 1 },
+                versions_seen: {},
+                pending_sends: []
+            };
             const metadata = { timestamp: new Date().toISOString() };
             await this.memorySaver.put(config, checkpoint as any, metadata as any);
 
@@ -133,8 +138,8 @@ export class AgentStateManager {
             const config = { configurable: { thread_id: conversationId } };
             const checkpoint = await this.memorySaver.get(config);
 
-            if (checkpoint && (checkpoint as any).data) {
-                const state = (checkpoint as any).data as ConversationState;
+            if (checkpoint && (checkpoint as any).channel_values?.conversation_state) {
+                const state = (checkpoint as any).channel_values.conversation_state as ConversationState;
                 this.logger.debug('Conversation state loaded', {
                     conversationId,
                     historyLength: state.history?.length || 0,
@@ -159,7 +164,13 @@ export class AgentStateManager {
 
         try {
             const config = { configurable: { thread_id: conversationId } };
-            const checkpoint = { data: null };
+            // Use proper checkpoint format for LangGraph
+            const checkpoint = {
+                channel_values: {},
+                channel_versions: {},
+                versions_seen: {},
+                pending_sends: []
+            };
             const metadata = { timestamp: new Date().toISOString() };
             await this.memorySaver.put(config, checkpoint as any, metadata as any);
 
