@@ -4,9 +4,9 @@
  */
 
 import mysql from 'mysql2/promise';
-import { getDatabaseConfig, DatabaseConfig } from '@/config/database.config';
-import { Logger } from '@/utils/Logger';
-import { RetryPolicy } from '@/types/common.types';
+import { getDatabaseConfig, DatabaseConfig } from '../config/database.config';
+import { Logger } from '../utils/Logger';
+import { RetryPolicy } from '../types/common.types';
 
 export interface DatabaseConnectionPool {
     pool: mysql.Pool;

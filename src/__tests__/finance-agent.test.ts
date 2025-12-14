@@ -2,7 +2,7 @@
  * Tests for the FinanceAgent implementation
  */
 
-import { FinanceAgent } from '@/agents/FinanceAgent';
+import { FinanceAgent } from '../agents/FinanceAgent';
 import { ChatDeepSeek } from '@langchain/deepseek';
 
 // Mock the ChatDeepSeek to avoid API calls in tests

@@ -736,10 +736,10 @@ export class ProcurementAgent extends BaseAgent {
             createShoppingListTools,
             createProcurementTools,
             createUserFeedbackTools
-        } = require('@/tools/DatabaseTools');
+        } = require('../tools/DatabaseTools');
 
-        const { createAllFileStorageTools } = require('@/tools/FileStorageTools');
-        const { createAllNotificationTools } = require('@/tools/NotificationTools');
+        const { createAllFileStorageTools } = require('../tools/FileStorageTools');
+        const { createAllNotificationTools } = require('../tools/NotificationTools');
 
         // Database tools for procurement management (including user feedback learning)
         const databaseTools = [

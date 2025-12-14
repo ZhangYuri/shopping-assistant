@@ -3,7 +3,7 @@
  */
 
 import 'dotenv/config';
-import { Logger } from '@/utils/Logger';
+import { Logger } from './utils/Logger';
 
 // Initialize main logger
 const logger = new Logger({

@@ -4,7 +4,7 @@
  */
 
 import Tesseract from 'tesseract.js';
-import { Logger } from '@/utils/Logger';
+import { Logger } from '../utils/Logger';
 import { FileStorageService } from './FileStorageService';
 
 export interface OCRResult {

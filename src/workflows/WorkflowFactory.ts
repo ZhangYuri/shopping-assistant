@@ -7,6 +7,8 @@ import { IntelligentAgentRouter, IntelligentRouterConfig } from './IntelligentAg
 import { AgentStateManager } from '../state/AgentStateManager';
 import { InventoryAgent } from '../agents/InventoryAgent';
 import { ProcurementAgent } from '../agents/ProcurementAgent';
+import { FinanceAgent } from '../agents/FinanceAgent';
+import { NotificationAgent } from '../agents/NotificationAgent';
 import { Logger } from '../utils/Logger';
 import { ChatDeepSeek } from '@langchain/deepseek';
 
@@ -43,6 +45,8 @@ export class WorkflowFactory {
         agents: {
             inventory: InventoryAgent;
             procurement: ProcurementAgent;
+            finance: FinanceAgent;
+            notification: NotificationAgent;
         };
     }> {
         try {
@@ -88,9 +92,13 @@ export class WorkflowFactory {
             // Register agents with router and workflow
             router.registerAgent(agents.inventory);
             router.registerAgent(agents.procurement);
+            router.registerAgent(agents.finance);
+            router.registerAgent(agents.notification);
 
             workflow.registerAgent('inventory', agents.inventory);
             workflow.registerAgent('procurement', agents.procurement);
+            workflow.registerAgent('finance', agents.finance);
+            workflow.registerAgent('notification', agents.notification);
 
             // Compile the workflow
             await workflow.compile();
@@ -119,10 +127,14 @@ export class WorkflowFactory {
     private async createAgents(config: WorkflowFactoryConfig): Promise<{
         inventory: InventoryAgent;
         procurement: ProcurementAgent;
+        finance: FinanceAgent;
+        notification: NotificationAgent;
     }> {
         // Create tool sets
         const inventoryTools = InventoryAgent.createInventoryTools();
         const procurementTools = ProcurementAgent.createProcurementTools();
+        const financeTools = FinanceAgent.createFinanceTools();
+        const notificationTools = NotificationAgent.createNotificationTools();
 
         // Create inventory agent
         const inventoryAgent = new InventoryAgent({
@@ -151,18 +163,56 @@ export class WorkflowFactory {
             defaultPlatforms: ['淘宝', '1688', '京东', '抖音商城', '中免日上', '拼多多'],
         });
 
+        // Create finance agent
+        const financeAgent = new FinanceAgent({
+            agentId: 'finance-agent-001',
+            name: 'Finance Management Agent',
+            description: '专业的财务管理智能体，处理财务分析和报告相关的所有操作',
+            databaseTools: config.enableDatabaseTools !== false ? financeTools.databaseTools : [],
+            notificationTools: config.enableNotificationTools !== false ? financeTools.notificationTools : [],
+            budgetLimits: {
+                '食品': 2000,
+                '日用品': 1000,
+                '清洁用品': 500,
+                '个人护理': 800,
+                '其他': 1500
+            },
+            anomalyThresholds: {
+                dailySpendingMultiplier: 3.0,
+                categorySpendingMultiplier: 2.5,
+                unusualItemThreshold: 500
+            }
+        });
+
+        // Create notification agent
+        const notificationAgent = new NotificationAgent({
+            agentId: 'notification-agent-001',
+            name: 'Notification Management Agent',
+            description: '专业的通知管理智能体，处理智能通知和用户沟通相关的所有操作',
+            notificationTools: config.enableNotificationTools !== false ? notificationTools.notificationTools : [],
+            databaseTools: config.enableDatabaseTools !== false ? notificationTools.databaseTools : [],
+            defaultChannels: ['teams'],
+            intelligentTiming: true,
+        });
+
         // Initialize agents
         await inventoryAgent.initialize();
         await procurementAgent.initialize();
+        await financeAgent.initialize();
+        await notificationAgent.initialize();
 
         this.logger.info('Agents created and initialized', {
             inventoryAgent: inventoryAgent.getConfig().agentId,
             procurementAgent: procurementAgent.getConfig().agentId,
+            financeAgent: financeAgent.getConfig().agentId,
+            notificationAgent: notificationAgent.getConfig().agentId,
         });
 
         return {
             inventory: inventoryAgent,
             procurement: procurementAgent,
+            finance: financeAgent,
+            notification: notificationAgent,
         };
     }
 
@@ -178,12 +228,13 @@ export class WorkflowFactory {
         try {
             this.logger.info('Creating test workflow');
 
-            // Create router with minimal config
+            // Create router with minimal config and LLM routing disabled
             const router = new IntelligentAgentRouter(stateManager, {
                 enableContextLearning: false,
                 confidenceThreshold: 0.5,
                 maxContextHistory: 5,
                 fallbackAgent: 'inventory',
+                enableLLMRouting: false, // Disable LLM routing for testing
             });
 
             // Create workflow with minimal config
@@ -197,20 +248,63 @@ export class WorkflowFactory {
                 },
             });
 
-            // Create minimal agents for testing
+            // Create minimal agents for testing all agent types
             const inventoryTools = InventoryAgent.createInventoryTools();
+            const procurementTools = ProcurementAgent.createProcurementTools();
+            const financeTools = FinanceAgent.createFinanceTools();
+            const notificationTools = NotificationAgent.createNotificationTools();
+
             const testInventoryAgent = new InventoryAgent({
                 agentId: 'test-inventory-agent',
                 name: 'Test Inventory Agent',
                 description: 'Test inventory agent',
-                databaseTools: inventoryTools.databaseTools.slice(0, 2), // Only first 2 tools
+                databaseTools: inventoryTools.databaseTools,
                 fileStorageTools: [],
                 notificationTools: [],
             });
 
+            const testProcurementAgent = new ProcurementAgent({
+                agentId: 'test-procurement-agent',
+                name: 'Test Procurement Agent',
+                description: 'Test procurement agent',
+                databaseTools: procurementTools.databaseTools,
+                fileStorageTools: [],
+                notificationTools: [],
+                defaultPlatforms: ['淘宝', '京东'],
+            });
+
+            const testFinanceAgent = new FinanceAgent({
+                agentId: 'test-finance-agent',
+                name: 'Test Finance Agent',
+                description: 'Test finance agent',
+                databaseTools: financeTools.databaseTools,
+                notificationTools: [],
+                budgetLimits: { '食品': 1000, '日用品': 500 },
+            });
+
+            const testNotificationAgent = new NotificationAgent({
+                agentId: 'test-notification-agent',
+                name: 'Test Notification Agent',
+                description: 'Test notification agent',
+                notificationTools: notificationTools.notificationTools,
+                databaseTools: [],
+                defaultChannels: ['teams'],
+            });
+
             await testInventoryAgent.initialize();
+            await testProcurementAgent.initialize();
+            await testFinanceAgent.initialize();
+            await testNotificationAgent.initialize();
+
             router.registerAgent(testInventoryAgent);
+            router.registerAgent(testProcurementAgent);
+            router.registerAgent(testFinanceAgent);
+            router.registerAgent(testNotificationAgent);
+
             workflow.registerAgent('inventory', testInventoryAgent);
+            workflow.registerAgent('procurement', testProcurementAgent);
+            workflow.registerAgent('finance', testFinanceAgent);
+            workflow.registerAgent('notification', testNotificationAgent);
 
             await workflow.compile();
 

@@ -4,7 +4,7 @@
  */
 
 import { DynamicTool } from '@langchain/core/tools';
-import { Logger } from '@/utils/Logger';
+import { Logger } from '../utils/Logger';
 
 // Import all tool collections
 import {

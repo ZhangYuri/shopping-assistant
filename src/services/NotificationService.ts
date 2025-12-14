@@ -3,8 +3,8 @@
  * Handles multi-channel notification sending with retry and fallback mechanisms
  */
 
-import { Logger } from '@/utils/Logger';
-import { RetryPolicy } from '@/types/common.types';
+import { Logger } from '../utils/Logger';
+import { RetryPolicy } from '../types/common.types';
 
 export interface NotificationChannel {
     name: string;
@@ -482,7 +482,7 @@ export class NotificationService {
 
         // Add actions if provided
         if (message.actions && message.actions.length > 0) {
-            payload.sections[0]["potentialAction"] = message.actions.map(action => ({
+            (payload.sections[0] as any)["potentialAction"] = message.actions.map(action => ({
                 "@type": "OpenUri",
                 "name": action.label,
                 "targets": [{

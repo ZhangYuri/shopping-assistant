@@ -7,8 +7,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { createReadStream, createWriteStream } from 'fs';
 import sharp from 'sharp';
-import { Logger } from '@/utils/Logger';
-import { RetryPolicy } from '@/types/common.types';
+import { Logger } from '../utils/Logger';
+import { RetryPolicy } from '../types/common.types';
 
 export interface FileMetadata {
     fileId: string;

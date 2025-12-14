@@ -4,10 +4,10 @@
  */
 
 import { DynamicTool } from '@langchain/core/tools';
-import { FileStorageService } from '@/services/FileStorageService';
-import { OCRService } from '@/services/OCRService';
-import { ExcelParsingService } from '@/services/ExcelParsingService';
-import { Logger } from '@/utils/Logger';
+import { FileStorageService } from '../services/FileStorageService';
+import { OCRService } from '../services/OCRService';
+import { ExcelParsingService } from '../services/ExcelParsingService';
+import { Logger } from '../utils/Logger';
 
 const logger = new Logger({
     component: 'FileStorageTools',

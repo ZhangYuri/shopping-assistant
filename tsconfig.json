@@ -2,7 +2,9 @@
     "compilerOptions": {
         "target": "ES2022",
         "module": "commonjs",
-        "lib": ["ES2022"],
+        "lib": [
+            "ES2022"
+        ],
         "outDir": "./dist",
         "rootDir": "./src",
         "strict": true,
@@ -21,11 +23,18 @@
         "moduleResolution": "node",
         "baseUrl": "./",
         "paths": {
-            "@/*": ["src/*"],
-            "@agents/*": ["src/agents/*"],
-            "@mcp/*": ["src/mcp/*"],
-            "@types/*": ["src/types/*"],
-            "@utils/*": ["src/utils/*"]
+            "@/*": [
+                "src/*"
+            ],
+            "@agents/*": [
+                "src/agents/*"
+            ],
+            "@types/*": [
+                "src/types/*"
+            ],
+            "@utils/*": [
+                "src/utils/*"
+            ]
         },
         "allowSyntheticDefaultImports": true,
         "experimentalDecorators": true,

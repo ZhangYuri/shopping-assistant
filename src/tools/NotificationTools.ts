@@ -4,8 +4,8 @@
  */
 
 import { DynamicTool } from '@langchain/core/tools';
-import { NotificationService, NotificationRequest, NotificationMessage, NotificationChannel, NotificationTemplate } from '@/services/NotificationService';
-import { Logger } from '@/utils/Logger';
+import { NotificationService, NotificationRequest, NotificationMessage, NotificationChannel, NotificationTemplate } from '../services/NotificationService';
+import { Logger } from '../utils/Logger';
 
 const logger = new Logger({
     component: 'NotificationTools',
@@ -555,6 +555,212 @@ export const sendFinancialReportTool = new DynamicTool({
 
         } catch (error) {
             logger.error('Failed to send financial report', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+// Additional notification tools for different channels
+
+export const sendDingTalkNotificationTool = new DynamicTool({
+    name: 'send_dingtalk_notification',
+    description: '发送钉钉通知。输入: {"title": "标题", "content": "内容", "priority": "优先级", "webhookUrl": "Webhook URL(可选)"}',
+    func: async (input: string) => {
+        try {
+            const {
+                title,
+                content,
+                priority = 'normal',
+                webhookUrl,
+                metadata
+            } = JSON.parse(input);
+
+            if (!title || !content) {
+                return JSON.stringify({
+                    success: false,
+                    error: '标题和内容不能为空'
+                });
+            }
+
+            let channelName = 'dingtalk-default';
+
+            if (webhookUrl) {
+                channelName = `dingtalk-temp-${Date.now()}`;
+                notificationService.addChannel({
+                    name: channelName,
+                    type: 'dingtalk',
+                    config: { webhookUrl },
+                    enabled: true,
+                    priority: 1
+                });
+            }
+
+            const request: NotificationRequest = {
+                channels: [channelName],
+                message: {
+                    title,
+                    content,
+                    priority,
+                    metadata
+                }
+            };
+
+            const result = await notificationService.sendNotification(request);
+
+            if (webhookUrl) {
+                notificationService.removeChannel(channelName);
+            }
+
+            return JSON.stringify({
+                success: result.success,
+                data: {
+                    notificationId: result.notificationId,
+                    channelResults: result.channelResults
+                },
+                error: result.error
+            });
+
+        } catch (error) {
+            logger.error('Failed to send DingTalk notification', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const sendWeChatWorkNotificationTool = new DynamicTool({
+    name: 'send_wechat_work_notification',
+    description: '发送企业微信通知。输入: {"title": "标题", "content": "内容", "priority": "优先级", "webhookUrl": "Webhook URL(可选)"}',
+    func: async (input: string) => {
+        try {
+            const {
+                title,
+                content,
+                priority = 'normal',
+                webhookUrl,
+                metadata
+            } = JSON.parse(input);
+
+            if (!title || !content) {
+                return JSON.stringify({
+                    success: false,
+                    error: '标题和内容不能为空'
+                });
+            }
+
+            let channelName = 'wechat-work-default';
+
+            if (webhookUrl) {
+                channelName = `wechat-work-temp-${Date.now()}`;
+                notificationService.addChannel({
+                    name: channelName,
+                    type: 'wechat-work',
+                    config: { webhookUrl },
+                    enabled: true,
+                    priority: 1
+                });
+            }
+
+            const request: NotificationRequest = {
+                channels: [channelName],
+                message: {
+                    title,
+                    content,
+                    priority,
+                    metadata
+                }
+            };
+
+            const result = await notificationService.sendNotification(request);
+
+            if (webhookUrl) {
+                notificationService.removeChannel(channelName);
+            }
+
+            return JSON.stringify({
+                success: result.success,
+                data: {
+                    notificationId: result.notificationId,
+                    channelResults: result.channelResults
+                },
+                error: result.error
+            });
+
+        } catch (error) {
+            logger.error('Failed to send WeChat Work notification', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const sendSlackNotificationTool = new DynamicTool({
+    name: 'send_slack_notification',
+    description: '发送Slack通知。输入: {"title": "标题", "content": "内容", "priority": "优先级", "webhookUrl": "Webhook URL(可选)"}',
+    func: async (input: string) => {
+        try {
+            const {
+                title,
+                content,
+                priority = 'normal',
+                webhookUrl,
+                metadata
+            } = JSON.parse(input);
+
+            if (!title || !content) {
+                return JSON.stringify({
+                    success: false,
+                    error: '标题和内容不能为空'
+                });
+            }
+
+            let channelName = 'slack-default';
+
+            if (webhookUrl) {
+                channelName = `slack-temp-${Date.now()}`;
+                notificationService.addChannel({
+                    name: channelName,
+                    type: 'slack',
+                    config: { webhookUrl },
+                    enabled: true,
+                    priority: 1
+                });
+            }
+
+            const request: NotificationRequest = {
+                channels: [channelName],
+                message: {
+                    title,
+                    content,
+                    priority,
+                    metadata
+                }
+            };
+
+            const result = await notificationService.sendNotification(request);
+
+            if (webhookUrl) {
+                notificationService.removeChannel(channelName);
+            }
+
+            return JSON.stringify({
+                success: result.success,
+                data: {
+                    notificationId: result.notificationId,
+                    channelResults: result.channelResults
+                },
+                error: result.error
+            });
+
+        } catch (error) {
+            logger.error('Failed to send Slack notification', { error });
             return JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : String(error)

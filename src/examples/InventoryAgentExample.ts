@@ -2,7 +2,7 @@
  * Example usage of the new InventoryAgent with LangChain integration
  */
 
-import { InventoryAgent } from '@/agents/InventoryAgent';
+import { InventoryAgent } from '../agents/InventoryAgent';
 import { ChatDeepSeek } from '@langchain/deepseek';
 
 async function demonstrateInventoryAgent() {

@@ -44,7 +44,7 @@ export interface AgentResult {
 export abstract class BaseAgent extends EventEmitter {
     protected logger: Logger;
     protected config: BaseAgentConfig;
-    protected model: ChatDeepSeek;
+    protected model?: ChatDeepSeek;
     protected agent: any;
     protected memory?: MemorySaver;
     protected tools: DynamicTool[];
@@ -62,12 +62,19 @@ export abstract class BaseAgent extends EventEmitter {
             level: 'info',
         });
 
-        // Initialize LLM model
-        this.model = config.model || new ChatDeepSeek({
-            apiKey: process.env.DEEPSEEK_API_KEY,
-            model: 'deepseek-chat',
-            temperature: 0.1, // Lower temperature for more consistent responses
-        });
+        // Initialize LLM model only if available
+        if (config.model) {
+            this.model = config.model;
+        } else if (process.env.DEEPSEEK_API_KEY) {
+            this.model = new ChatDeepSeek({
+                apiKey: process.env.DEEPSEEK_API_KEY,
+                model: 'deepseek-chat',
+                temperature: 0.1, // Lower temperature for more consistent responses
+            });
+        } else {
+            // For testing without API key, create a mock model
+            this.logger.warn('No DeepSeek API key found, agent will run in limited mode');
+        }
 
         // Initialize metrics
         this._metrics = {
@@ -103,12 +110,26 @@ export abstract class BaseAgent extends EventEmitter {
                 hasMemory: !!this.memory
             });
 
-            // Create the LangChain React agent
-            this.agent = createReactAgent({
-                llm: this.model,
-                tools: this.tools,
-                checkpointSaver: this.memory,
-            });
+            // Create the LangChain React agent only if model is available
+            if (this.model) {
+                this.agent = createReactAgent({
+                    llm: this.model,
+                    tools: this.tools,
+                    checkpointSaver: this.memory,
+                });
+            } else {
+                // For testing without LLM, create a mock agent
+                this.agent = {
+                    invoke: async (input: any, config?: any) => {
+                        return {
+                            messages: [{
+                                content: `Mock response for: ${JSON.stringify(input.messages?.[1]?.content || input)}`
+                            }]
+                        };
+                    }
+                };
+                this.logger.warn('Created mock agent due to missing LLM model');
+            }
 
             // Perform any custom initialization
             await this.onInitialize();

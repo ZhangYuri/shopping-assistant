@@ -4,8 +4,8 @@
  */
 
 import { DynamicTool } from '@langchain/core/tools';
-import { DatabaseService } from '@/services/DatabaseService';
-import { Logger } from '@/utils/Logger';
+import { DatabaseService } from '../services/DatabaseService';
+import { Logger } from '../utils/Logger';
 
 const logger = new Logger({
     component: 'DatabaseTools',
@@ -2593,3 +2593,412 @@ export function createAllDatabaseTools(): DynamicTool[] {
         ...createUserFeedbackTools()
     ];
 }
+
+// Notification-related database tools
+
+export const getUserPreferencesTool = new DynamicTool({
+    name: 'get_user_preferences',
+    description: '获取用户通知偏好设置。输入: {"userId": "用户ID"}',
+    func: async (input: string) => {
+        try {
+            const { userId } = JSON.parse(input);
+
+            if (!userId) {
+                return JSON.stringify({
+                    success: false,
+                    error: '用户ID不能为空'
+                });
+            }
+
+            const result = await databaseService.query(
+                'SELECT * FROM user_preferences WHERE user_id = ?',
+                [userId]
+            );
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data && result.data.length > 0 ? result.data[0] : null
+            });
+
+        } catch (error) {
+            logger.error('Failed to get user preferences', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const saveUserPreferencesTool = new DynamicTool({
+    name: 'save_user_preferences',
+    description: '保存用户通知偏好设置。输入: {"userId": "用户ID", "preferences": {"enabledChannels": ["渠道"], "quietHours": {"start": "22:00", "end": "08:00"}, "categoryPreferences": {"类别": true/false}, "language": "zh-CN"}}',
+    func: async (input: string) => {
+        try {
+            const { userId, preferences } = JSON.parse(input);
+
+            if (!userId || !preferences) {
+                return JSON.stringify({
+                    success: false,
+                    error: '用户ID和偏好设置不能为空'
+                });
+            }
+
+            // Check if preferences exist
+            const existingResult = await databaseService.query(
+                'SELECT id FROM user_preferences WHERE user_id = ?',
+                [userId]
+            );
+
+            let result;
+            if (existingResult.success && existingResult.data && existingResult.data.length > 0) {
+                // Update existing preferences
+                result = await databaseService.query(
+                    `UPDATE user_preferences SET
+                     enabled_channels = ?,
+                     quiet_hours = ?,
+                     category_preferences = ?,
+                     language = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                     WHERE user_id = ?`,
+                    [
+                        JSON.stringify(preferences.enabledChannels || []),
+                        JSON.stringify(preferences.quietHours || {}),
+                        JSON.stringify(preferences.categoryPreferences || {}),
+                        preferences.language || 'zh-CN',
+                        userId
+                    ]
+                );
+            } else {
+                // Insert new preferences
+                result = await databaseService.query(
+                    `INSERT INTO user_preferences
+                     (user_id, enabled_channels, quiet_hours, category_preferences, language, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                    [
+                        userId,
+                        JSON.stringify(preferences.enabledChannels || []),
+                        JSON.stringify(preferences.quietHours || {}),
+                        JSON.stringify(preferences.categoryPreferences || {}),
+                        preferences.language || 'zh-CN'
+                    ]
+                );
+            }
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: {
+                    userId,
+                    preferences,
+                    message: '用户偏好设置已保存'
+                }
+            });
+
+        } catch (error) {
+            logger.error('Failed to save user preferences', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const getNotificationHistoryTool = new DynamicTool({
+    name: 'get_notification_history',
+    description: '获取用户通知历史记录。输入: {"userId": "用户ID", "limit": 限制数量, "offset": 偏移量, "type": "通知类型筛选"}',
+    func: async (input: string) => {
+        try {
+            const { userId, limit = 50, offset = 0, type } = JSON.parse(input);
+
+            if (!userId) {
+                return JSON.stringify({
+                    success: false,
+                    error: '用户ID不能为空'
+                });
+            }
+
+            let query = 'SELECT * FROM notification_history WHERE user_id = ?';
+            const params = [userId];
+
+            if (type) {
+                query += ' AND notification_type = ?';
+                params.push(type);
+            }
+
+            query += ' ORDER BY sent_at DESC LIMIT ? OFFSET ?';
+            params.push(limit, offset);
+
+            const result = await databaseService.query(query, params);
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data || [],
+                count: Array.isArray(result.data) ? result.data.length : 0
+            });
+
+        } catch (error) {
+            logger.error('Failed to get notification history', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const saveNotificationHistoryTool = new DynamicTool({
+    name: 'save_notification_history',
+    description: '保存通知历史记录。输入: {"userId": "用户ID", "notificationId": "通知ID", "type": "通知类型", "channel": "发送渠道", "title": "标题", "content": "内容", "wasRead": 是否已读, "wasActioned": 是否已操作}',
+    func: async (input: string) => {
+        try {
+            const {
+                userId,
+                notificationId,
+                type,
+                channel,
+                title,
+                content,
+                wasRead = false,
+                wasActioned = false
+            } = JSON.parse(input);
+
+            if (!userId || !notificationId || !type || !channel) {
+                return JSON.stringify({
+                    success: false,
+                    error: '用户ID、通知ID、类型和渠道不能为空'
+                });
+            }
+
+            const result = await databaseService.query(
+                `INSERT INTO notification_history
+                 (user_id, notification_id, notification_type, channel, title, content, was_read, was_actioned, sent_at, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                [userId, notificationId, type, channel, title, content, wasRead, wasActioned]
+            );
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: {
+                    userId,
+                    notificationId,
+                    type,
+                    channel,
+                    message: '通知历史记录已保存'
+                }
+            });
+
+        } catch (error) {
+            logger.error('Failed to save notification history', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const updateNotificationStatusTool = new DynamicTool({
+    name: 'update_notification_status',
+    description: '更新通知状态（已读、已操作等）。输入: {"notificationId": "通知ID", "wasRead": 是否已读, "wasActioned": 是否已操作, "actionData": "操作数据"}',
+    func: async (input: string) => {
+        try {
+            const { notificationId, wasRead, wasActioned, actionData } = JSON.parse(input);
+
+            if (!notificationId) {
+                return JSON.stringify({
+                    success: false,
+                    error: '通知ID不能为空'
+                });
+            }
+
+            const updates = [];
+            const params = [];
+
+            if (wasRead !== undefined) {
+                updates.push('was_read = ?');
+                params.push(wasRead);
+            }
+
+            if (wasActioned !== undefined) {
+                updates.push('was_actioned = ?');
+                params.push(wasActioned);
+            }
+
+            if (actionData !== undefined) {
+                updates.push('action_data = ?');
+                params.push(JSON.stringify(actionData));
+            }
+
+            if (updates.length === 0) {
+                return JSON.stringify({
+                    success: false,
+                    error: '没有提供要更新的状态'
+                });
+            }
+
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            params.push(notificationId);
+
+            const result = await databaseService.query(
+                `UPDATE notification_history SET ${updates.join(', ')} WHERE notification_id = ?`,
+                params
+            );
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: {
+                    notificationId,
+                    updatedFields: updates.length - 1, // Exclude updated_at
+                    message: '通知状态已更新'
+                }
+            });
+
+        } catch (error) {
+            logger.error('Failed to update notification status', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const getNotificationAnalyticsTool = new DynamicTool({
+    name: 'get_notification_analytics',
+    description: '获取通知分析数据。输入: {"startDate": "开始日期", "endDate": "结束日期", "userId": "用户ID(可选)", "type": "通知类型(可选)", "channel": "渠道(可选)"}',
+    func: async (input: string) => {
+        try {
+            const { startDate, endDate, userId, type, channel } = JSON.parse(input);
+
+            if (!startDate || !endDate) {
+                return JSON.stringify({
+                    success: false,
+                    error: '开始日期和结束日期不能为空'
+                });
+            }
+
+            let whereClause = 'WHERE sent_at BETWEEN ? AND ?';
+            const params = [startDate, endDate];
+
+            if (userId) {
+                whereClause += ' AND user_id = ?';
+                params.push(userId);
+            }
+
+            if (type) {
+                whereClause += ' AND notification_type = ?';
+                params.push(type);
+            }
+
+            if (channel) {
+                whereClause += ' AND channel = ?';
+                params.push(channel);
+            }
+
+            // Get overall statistics
+            const statsResult = await databaseService.query(
+                `SELECT
+                    COUNT(*) as total_notifications,
+                    SUM(CASE WHEN was_read = 1 THEN 1 ELSE 0 END) as read_notifications,
+                    SUM(CASE WHEN was_actioned = 1 THEN 1 ELSE 0 END) as actioned_notifications,
+                    COUNT(DISTINCT user_id) as unique_users
+                 FROM notification_history ${whereClause}`,
+                params
+            );
+
+            // Get channel breakdown
+            const channelResult = await databaseService.query(
+                `SELECT
+                    channel,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN was_read = 1 THEN 1 ELSE 0 END) as read_count,
+                    SUM(CASE WHEN was_actioned = 1 THEN 1 ELSE 0 END) as action_count
+                 FROM notification_history ${whereClause}
+                 GROUP BY channel`,
+                params
+            );
+
+            // Get type breakdown
+            const typeResult = await databaseService.query(
+                `SELECT
+                    notification_type,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN was_read = 1 THEN 1 ELSE 0 END) as read_count,
+                    SUM(CASE WHEN was_actioned = 1 THEN 1 ELSE 0 END) as action_count
+                 FROM notification_history ${whereClause}
+                 GROUP BY notification_type`,
+                params
+            );
+
+            if (!statsResult.success || !channelResult.success || !typeResult.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: '查询通知分析数据失败'
+                });
+            }
+
+            const stats = statsResult.data && statsResult.data.length > 0 ? statsResult.data[0] : {};
+            const totalNotifications = stats.total_notifications || 0;
+
+            return JSON.stringify({
+                success: true,
+                data: {
+                    period: { startDate, endDate },
+                    overall: {
+                        totalNotifications,
+                        readNotifications: stats.read_notifications || 0,
+                        actionedNotifications: stats.actioned_notifications || 0,
+                        uniqueUsers: stats.unique_users || 0,
+                        readRate: totalNotifications > 0 ? ((stats.read_notifications || 0) / totalNotifications * 100).toFixed(2) : '0.00',
+                        actionRate: totalNotifications > 0 ? ((stats.actioned_notifications || 0) / totalNotifications * 100).toFixed(2) : '0.00'
+                    },
+                    byChannel: channelResult.data || [],
+                    byType: typeResult.data || []
+                }
+            });
+
+        } catch (error) {
+            logger.error('Failed to get notification analytics', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});

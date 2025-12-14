@@ -922,12 +922,12 @@ export class FinanceAgent extends BaseAgent {
             detectAnomalousSpendingTool,
             getBudgetStatusTool,
             analyzeSpendingTrendsTool
-        } = require('@/tools/DatabaseTools');
+        } = require('../tools/DatabaseTools');
 
         const {
             sendNotificationTool,
             sendFinancialReportTool
-        } = require('@/tools/NotificationTools');
+        } = require('../tools/NotificationTools');
 
         // Database tools for financial analysis
         const databaseTools = [

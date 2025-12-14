@@ -3,7 +3,7 @@
  */
 
 import * as Joi from 'joi';
-import { ValidationResult } from '@/types/common.types';
+import { ValidationResult } from '../types/common.types';
 
 export class ValidationUtils {
     /**

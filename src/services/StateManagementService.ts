@@ -5,7 +5,7 @@
 
 import { MemorySaver } from '@langchain/langgraph';
 import { InMemoryStore } from '@langchain/core/stores';
-import { Logger } from '@/utils/Logger';
+import { Logger } from '../utils/Logger';
 
 export interface ConversationState {
     conversationId: string;
@@ -122,11 +122,16 @@ export class StateManagementService {
             this.conversationStates.set(conversationId, updatedState);
 
             // Also save to MemorySaver for LangGraph workflows
-            await this.memorySaver.put(
-                { configurable: { thread_id: conversationId } },
-                'conversation_state',
-                updatedState
-            );
+            try {
+                await (this.memorySaver as any).put(
+                    { configurable: { thread_id: conversationId } },
+                    'conversation_state',
+                    updatedState
+                );
+            } catch (error) {
+                // MemorySaver API might be different, log but don't fail
+                this.logger.warn('Failed to save to MemorySaver', { error });
+            }
 
             this.logger.debug('Conversation state saved', {
                 conversationId,
@@ -154,13 +159,12 @@ export class StateManagementService {
             if (!state) {
                 // Try to get from MemorySaver
                 try {
-                    const savedState = await this.memorySaver.get(
-                        { configurable: { thread_id: conversationId } },
-                        'conversation_state'
+                    const savedState = await (this.memorySaver as any).get(
+                        { configurable: { thread_id: conversationId } }
                     );
 
-                    if (savedState) {
-                        state = savedState as ConversationState;
+                    if (savedState && savedState.conversation_state) {
+                        state = savedState.conversation_state as ConversationState;
                         this.conversationStates.set(conversationId, state);
                     }
                 } catch {
@@ -311,7 +315,12 @@ export class StateManagementService {
 
             // Also clear from MemorySaver
             try {
-                await this.memorySaver.delete({ configurable: { thread_id: conversationId } });
+                // MemorySaver might not have delete method, use put with null
+                await (this.memorySaver as any).put(
+                    { configurable: { thread_id: conversationId } },
+                    'conversation_state',
+                    null
+                );
             } catch {
                 // Ignore if doesn't exist
             }

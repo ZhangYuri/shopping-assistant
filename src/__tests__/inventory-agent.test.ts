@@ -2,7 +2,7 @@
  * Tests for the new InventoryAgent implementation
  */
 
-import { InventoryAgent } from '@/agents/InventoryAgent';
+import { InventoryAgent } from '../agents/InventoryAgent';
 import { ChatDeepSeek } from '@langchain/deepseek';
 
 // Mock the ChatDeepSeek to avoid API calls in tests

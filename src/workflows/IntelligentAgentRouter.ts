@@ -37,6 +37,7 @@ export interface IntelligentRouterConfig {
     maxContextHistory: number;
     fallbackAgent: AgentType;
     enableEntityExtraction: boolean;
+    enableLLMRouting?: boolean; // New flag to enable/disable LLM routing
 }
 
 /**
@@ -46,7 +47,7 @@ export interface IntelligentRouterConfig {
 export class IntelligentAgentRouter {
     private logger: Logger;
     private stateManager: AgentStateManager;
-    private llm: ChatDeepSeek;
+    private llm?: ChatDeepSeek;
     private config: IntelligentRouterConfig;
     private agents: Map<AgentType, BaseAgent> = new Map();
     private routingHistory: Map<string, IntelligentRoutingResult[]> = new Map();
@@ -62,6 +63,7 @@ export class IntelligentAgentRouter {
             maxContextHistory: 10,
             fallbackAgent: 'inventory',
             enableEntityExtraction: true,
+            enableLLMRouting: true,
             ...config,
         };
 
@@ -70,17 +72,21 @@ export class IntelligentAgentRouter {
             level: 'info',
         });
 
-        // Initialize LLM for intelligent routing
-        this.llm = config.llmModel || new ChatDeepSeek({
-            apiKey: process.env.DEEPSEEK_API_KEY,
-            model: 'deepseek-chat',
-            temperature: 0.1, // Low temperature for consistent routing decisions
-        });
+        // Initialize LLM for intelligent routing only if enabled and API key is available
+        if (this.config.enableLLMRouting && (config.llmModel || process.env.DEEPSEEK_API_KEY)) {
+            this.llm = config.llmModel || new ChatDeepSeek({
+                apiKey: process.env.DEEPSEEK_API_KEY,
+                model: 'deepseek-chat',
+                temperature: 0.1, // Low temperature for consistent routing decisions
+            });
+        }
 
         this.logger.info('Intelligent Agent Router initialized', {
             enableContextLearning: this.config.enableContextLearning,
             confidenceThreshold: this.config.confidenceThreshold,
             fallbackAgent: this.config.fallbackAgent,
+            enableLLMRouting: this.config.enableLLMRouting,
+            hasLLM: !!this.llm,
         });
     }
 
@@ -97,7 +103,7 @@ export class IntelligentAgentRouter {
     }
 
     /**
-     * Perform intelligent routing using LLM-based analysis
+     * Perform intelligent routing using LLM-based analysis or rule-based fallback
      */
     async routeIntelligently(
         userInput: string,
@@ -108,36 +114,15 @@ export class IntelligentAgentRouter {
                 conversationId: context.conversationId,
                 userInput: userInput.substring(0, 100),
                 historyLength: context.sessionHistory.length,
+                hasLLM: !!this.llm,
             });
 
-            // Build context-aware prompt for LLM routing
-            const routingPrompt = this.buildRoutingPrompt(userInput, context);
-
-            // Get LLM routing decision
-            const llmResponse = await this.llm.invoke([
-                new SystemMessage(this.getRoutingSystemPrompt()),
-                new HumanMessage(routingPrompt),
-            ]);
-
-            // Parse LLM response
-            const routingResult = this.parseLLMRoutingResponse(llmResponse.content as string, userInput);
-
-            // Apply confidence threshold and fallback logic
-            const finalResult = this.applyRoutingLogic(routingResult, context);
-
-            // Store routing decision for learning
-            if (this.config.enableContextLearning) {
-                await this.storeRoutingDecision(context.conversationId, finalResult);
+            // Use LLM routing if available, otherwise use rule-based routing
+            if (this.llm && this.config.enableLLMRouting) {
+                return await this.performLLMRouting(userInput, context);
+            } else {
+                return await this.performRuleBasedRouting(userInput, context);
             }
-
-            this.logger.info('Intelligent routing completed', {
-                conversationId: context.conversationId,
-                targetAgent: finalResult.targetAgent,
-                confidence: finalResult.confidence,
-                reasoning: finalResult.reasoning.substring(0, 100),
-            });
-
-            return finalResult;
         } catch (error) {
             this.logger.error('Intelligent routing failed', {
                 conversationId: context.conversationId,
@@ -148,6 +133,109 @@ export class IntelligentAgentRouter {
             // Return fallback routing result
             return this.getFallbackRoutingResult(userInput, error);
         }
+    }
+
+    /**
+     * Perform LLM-based routing
+     */
+    private async performLLMRouting(
+        userInput: string,
+        context: RoutingContext
+    ): Promise<IntelligentRoutingResult> {
+        if (!this.llm) {
+            throw new Error('LLM not available for routing');
+        }
+
+        // Build context-aware prompt for LLM routing
+        const routingPrompt = this.buildRoutingPrompt(userInput, context);
+
+        // Get LLM routing decision
+        const llmResponse = await this.llm.invoke([
+            new SystemMessage(this.getRoutingSystemPrompt()),
+            new HumanMessage(routingPrompt),
+        ]);
+
+        // Parse LLM response
+        const routingResult = this.parseLLMRoutingResponse(llmResponse.content as string, userInput);
+
+        // Apply confidence threshold and fallback logic
+        const finalResult = this.applyRoutingLogic(routingResult, context);
+
+        // Store routing decision for learning
+        if (this.config.enableContextLearning) {
+            await this.storeRoutingDecision(context.conversationId, finalResult);
+        }
+
+        this.logger.info('LLM routing completed', {
+            conversationId: context.conversationId,
+            targetAgent: finalResult.targetAgent,
+            confidence: finalResult.confidence,
+            reasoning: finalResult.reasoning.substring(0, 100),
+        });
+
+        return finalResult;
+    }
+
+    /**
+     * Perform rule-based routing as fallback
+     */
+    private async performRuleBasedRouting(
+        userInput: string,
+        context: RoutingContext
+    ): Promise<IntelligentRoutingResult> {
+        const input = userInput.toLowerCase();
+        let targetAgent: AgentType = this.config.fallbackAgent;
+        let confidence = 0.6; // Default confidence for rule-based routing
+        let reasoning = '基于规则的路由决策';
+
+        // Simple keyword-based routing rules
+        if (input.includes('库存') || input.includes('消耗') || input.includes('添加') ||
+            input.includes('抽纸') || input.includes('牛奶') || input.includes('物品') ||
+            input.includes('照片') || input.includes('图片') || input.includes('拍照')) {
+            targetAgent = 'inventory';
+            confidence = 0.8;
+            reasoning = '检测到库存相关关键词，路由到库存智能体';
+        } else if (input.includes('订单') || input.includes('采购') || input.includes('购买') ||
+            input.includes('淘宝') || input.includes('1688') || input.includes('京东') ||
+            input.includes('导入') || input.includes('excel') || input.includes('建议')) {
+            targetAgent = 'procurement';
+            confidence = 0.8;
+            reasoning = '检测到采购相关关键词，路由到采购智能体';
+        } else if (input.includes('财务') || input.includes('支出') || input.includes('预算') ||
+            input.includes('报告') || input.includes('分析') || input.includes('异常') ||
+            input.includes('花费') || input.includes('消费')) {
+            targetAgent = 'finance';
+            confidence = 0.8;
+            reasoning = '检测到财务相关关键词，路由到财务智能体';
+        } else if (input.includes('通知') || input.includes('提醒') || input.includes('发送') ||
+            input.includes('teams') || input.includes('钉钉') || input.includes('微信')) {
+            targetAgent = 'notification';
+            confidence = 0.8;
+            reasoning = '检测到通知相关关键词，路由到通知智能体';
+        }
+
+        const result: IntelligentRoutingResult = {
+            targetAgent,
+            confidence,
+            reasoning,
+            extractedEntities: this.extractBasicEntities(userInput),
+            suggestedActions: [`使用${targetAgent}智能体处理请求`],
+            contextualInfo: `基于关键词匹配的路由决策，置信度: ${confidence}`,
+        };
+
+        // Store routing decision for learning
+        if (this.config.enableContextLearning) {
+            await this.storeRoutingDecision(context.conversationId, result);
+        }
+
+        this.logger.info('Rule-based routing completed', {
+            conversationId: context.conversationId,
+            targetAgent: result.targetAgent,
+            confidence: result.confidence,
+            reasoning: result.reasoning,
+        });
+
+        return result;
     }
 
     /**
@@ -535,6 +623,49 @@ export class IntelligentAgentRouter {
                 error: error instanceof Error ? error.message : String(error),
             });
         }
+    }
+
+    /**
+     * Extract basic entities from user input for rule-based routing
+     */
+    private extractBasicEntities(userInput: string): Record<string, any> {
+        const entities: Record<string, any> = {};
+        const input = userInput.toLowerCase();
+
+        // Extract numbers (quantities)
+        const numbers = userInput.match(/\d+/g);
+        if (numbers) {
+            entities.quantities = numbers.map(n => parseInt(n));
+        }
+
+        // Extract common items
+        const commonItems = ['抽纸', '牛奶', '洗发水', '牙膏', '面包', '鸡蛋', '大米', '油'];
+        for (const item of commonItems) {
+            if (input.includes(item)) {
+                entities.items = entities.items || [];
+                entities.items.push(item);
+            }
+        }
+
+        // Extract actions
+        const actions = ['消耗', '添加', '查询', '更新', '导入', '分析', '发送'];
+        for (const action of actions) {
+            if (input.includes(action)) {
+                entities.actions = entities.actions || [];
+                entities.actions.push(action);
+            }
+        }
+
+        // Extract platforms
+        const platforms = ['淘宝', '1688', '京东', '拼多多', '抖音'];
+        for (const platform of platforms) {
+            if (input.includes(platform)) {
+                entities.platforms = entities.platforms || [];
+                entities.platforms.push(platform);
+            }
+        }
+
+        return entities;
     }
 
     // Helper methods

@@ -4,7 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
-import { Logger } from '@/utils/Logger';
+import { Logger } from '../utils/Logger';
 import { FileStorageService } from './FileStorageService';
 
 export interface ParsedOrder {
