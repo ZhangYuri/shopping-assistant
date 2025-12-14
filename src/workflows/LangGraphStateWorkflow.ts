@@ -8,7 +8,6 @@ import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import { Logger } from '../utils/Logger';
 import { BaseAgent } from '../agents/base/BaseAgent';
 import { IntelligentAgentRouter, IntelligentRoutingResult, RoutingContext, AgentType } from './IntelligentAgentRouter';
-import { AgentStateManager } from '../state/AgentStateManager';
 import { v4 as uuidv4 } from 'uuid';
 
 // LangGraph workflow state interface
@@ -48,18 +47,15 @@ export class LangGraphStateWorkflow {
     private stateGraph: any; // Use any to avoid complex type issues
     private memorySaver: MemorySaver;
     private agentRouter: IntelligentAgentRouter;
-    private stateManager: AgentStateManager;
     private agents: Map<string, BaseAgent> = new Map();
     private config: LangGraphWorkflowConfig;
     private compiledGraph: any;
 
     constructor(
         agentRouter: IntelligentAgentRouter,
-        stateManager: AgentStateManager,
         config: Partial<LangGraphWorkflowConfig> = {}
     ) {
         this.agentRouter = agentRouter;
-        this.stateManager = stateManager;
         this.config = {
             enableMemory: true,
             maxSteps: 10,

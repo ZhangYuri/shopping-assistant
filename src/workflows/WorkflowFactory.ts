@@ -71,7 +71,7 @@ export class WorkflowFactory {
             });
 
             // Create workflow
-            const workflow = new LangGraphStateWorkflow(router, stateManager, {
+            const workflow = new LangGraphStateWorkflow(router, {
                 enableMemory: true,
                 maxSteps: 10,
                 timeout: 300000,
@@ -187,7 +187,7 @@ export class WorkflowFactory {
             });
 
             // Create workflow with minimal config
-            const workflow = new LangGraphStateWorkflow(router, stateManager, {
+            const workflow = new LangGraphStateWorkflow(router, {
                 enableMemory: false,
                 maxSteps: 5,
                 timeout: 60000,
