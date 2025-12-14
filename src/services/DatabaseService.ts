@@ -70,9 +70,7 @@ export class DatabaseService {
                 password: this.config.password,
                 database: this.config.database,
                 connectionLimit: this.config.connectionLimit,
-                acquireTimeout: this.config.timeout,
-                timeout: this.config.timeout,
-                ssl: this.config.ssl,
+                ssl: this.config.ssl ? {} : undefined, // Convert boolean to SslOptions or undefined
                 charset: 'utf8mb4',
                 timezone: '+00:00'
             });
