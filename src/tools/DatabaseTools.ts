@@ -1193,10 +1193,771 @@ export function createProcurementTools(): DynamicTool[] {
     ];
 }
 
-export function createFinancialTools(): DynamicTool[] {
+// Financial analysis tools
+
+export const generateFinancialReportTool = new DynamicTool({
+    name: 'generate_financial_report',
+    description: '生成财务报告。输入: {"period": "报告期间(month/quarter/year)", "startDate": "开始日期", "endDate": "结束日期", "includeComparison": 是否包含对比分析}',
+    func: async (input: string) => {
+        try {
+            const {
+                period = 'month',
+                startDate,
+                endDate,
+                includeComparison = true
+            } = JSON.parse(input);
+
+            const result = await databaseService.transaction(async (connection) => {
+                // Calculate date range based on period
+                let reportStartDate: string;
+                let reportEndDate: string;
+                let comparisonStartDate: string = '';
+                let comparisonEndDate: string = '';
+
+                const now = new Date();
+
+                if (startDate && endDate) {
+                    reportStartDate = startDate;
+                    reportEndDate = endDate;
+                } else {
+                    switch (period) {
+                        case 'quarter':
+                            const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+                            reportStartDate = quarterStart.toISOString().split('T')[0];
+                            reportEndDate = new Date(quarterStart.getFullYear(), quarterStart.getMonth() + 3, 0).toISOString().split('T')[0];
+                            break;
+                        case 'year':
+                            reportStartDate = `${now.getFullYear()}-01-01`;
+                            reportEndDate = `${now.getFullYear()}-12-31`;
+                            break;
+                        case 'month':
+                        default:
+                            reportStartDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+                            const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                            reportEndDate = monthEnd.toISOString().split('T')[0];
+                            break;
+                    }
+                }
+
+                // Calculate comparison period (previous period)
+                if (includeComparison) {
+                    const startDateObj = new Date(reportStartDate);
+                    const endDateObj = new Date(reportEndDate);
+                    const periodLength = endDateObj.getTime() - startDateObj.getTime();
+
+                    comparisonEndDate = new Date(startDateObj.getTime() - 1).toISOString().split('T')[0];
+                    comparisonStartDate = new Date(startDateObj.getTime() - periodLength).toISOString().split('T')[0];
+                }
+
+                // Get current period data
+                const [currentPeriodData] = await connection.execute(`
+                    SELECT
+                        COUNT(ph.id) as total_orders,
+                        SUM(ph.total_price) as total_spending,
+                        SUM(ph.delivery_cost) as total_delivery,
+                        SUM(ph.pay_fee) as total_fees,
+                        AVG(ph.total_price) as avg_order_value,
+                        MAX(ph.total_price) as max_order_value,
+                        MIN(ph.total_price) as min_order_value
+                    FROM purchase_history ph
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                `, [reportStartDate, reportEndDate]);
+
+                // Get category breakdown
+                const [categoryBreakdown] = await connection.execute(`
+                    SELECT
+                        psl.category,
+                        COUNT(DISTINCT ph.id) as order_count,
+                        SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as category_spending,
+                        SUM(psl.purchase_quantity) as total_quantity,
+                        AVG(psl.unit_price) as avg_unit_price
+                    FROM purchase_history ph
+                    JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    GROUP BY psl.category
+                    ORDER BY category_spending DESC
+                `, [reportStartDate, reportEndDate]);
+
+                // Get platform breakdown
+                const [platformBreakdown] = await connection.execute(`
+                    SELECT
+                        ph.purchase_channel as platform,
+                        COUNT(ph.id) as order_count,
+                        SUM(ph.total_price) as platform_spending,
+                        AVG(ph.total_price) as avg_order_value
+                    FROM purchase_history ph
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    GROUP BY ph.purchase_channel
+                    ORDER BY platform_spending DESC
+                `, [reportStartDate, reportEndDate]);
+
+                // Get top spending items
+                const [topItems] = await connection.execute(`
+                    SELECT
+                        psl.item_name,
+                        psl.category,
+                        SUM(psl.purchase_quantity) as total_quantity,
+                        SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as total_spending,
+                        AVG(psl.unit_price) as avg_price,
+                        COUNT(DISTINCT ph.id) as purchase_frequency
+                    FROM purchase_history ph
+                    JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    GROUP BY psl.item_name, psl.category
+                    ORDER BY total_spending DESC
+                    LIMIT 10
+                `, [reportStartDate, reportEndDate]);
+
+                let comparisonData = null;
+                if (includeComparison) {
+                    const [comparisonPeriodData] = await connection.execute(`
+                        SELECT
+                            COUNT(ph.id) as total_orders,
+                            SUM(ph.total_price) as total_spending,
+                            SUM(ph.delivery_cost) as total_delivery,
+                            SUM(ph.pay_fee) as total_fees,
+                            AVG(ph.total_price) as avg_order_value
+                        FROM purchase_history ph
+                        WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    `, [comparisonStartDate, comparisonEndDate]);
+
+                    comparisonData = (comparisonPeriodData as any[])[0];
+                }
+
+                return {
+                    reportPeriod: {
+                        period,
+                        startDate: reportStartDate,
+                        endDate: reportEndDate
+                    },
+                    summary: (currentPeriodData as any[])[0],
+                    categoryBreakdown: categoryBreakdown,
+                    platformBreakdown: platformBreakdown,
+                    topItems: topItems,
+                    comparison: comparisonData ? {
+                        data: comparisonData,
+                        period: {
+                            startDate: comparisonStartDate,
+                            endDate: comparisonEndDate
+                        }
+                    } : null
+                };
+            });
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data
+            });
+
+        } catch (error) {
+            logger.error('Failed to generate financial report', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const detectAnomalousSpendingTool = new DynamicTool({
+    name: 'detect_anomalous_spending',
+    description: '检测异常消费行为。输入: {"analysisDepthDays": 分析天数, "dailyThresholdMultiplier": 日支出异常倍数, "categoryThresholdMultiplier": 类别异常倍数, "unusualItemThreshold": 单项异常金额}',
+    func: async (input: string) => {
+        try {
+            const {
+                analysisDepthDays = 30,
+                dailyThresholdMultiplier = 3.0,
+                categoryThresholdMultiplier = 2.5,
+                unusualItemThreshold = 500
+            } = JSON.parse(input);
+
+            const result = await databaseService.transaction(async (connection) => {
+                const analysisStartDate = new Date();
+                analysisStartDate.setDate(analysisStartDate.getDate() - analysisDepthDays);
+
+                // Calculate baseline daily spending
+                const [dailyBaseline] = await connection.execute(`
+                    SELECT
+                        AVG(daily_spending) as avg_daily_spending,
+                        STDDEV(daily_spending) as stddev_daily_spending
+                    FROM (
+                        SELECT
+                            DATE(ph.purchase_date) as purchase_day,
+                            SUM(ph.total_price) as daily_spending
+                        FROM purchase_history ph
+                        WHERE ph.purchase_date >= DATE_SUB(?, INTERVAL 90 DAY)
+                        AND ph.purchase_date < ?
+                        GROUP BY DATE(ph.purchase_date)
+                    ) daily_stats
+                `, [analysisStartDate, analysisStartDate]);
+
+                const baseline = (dailyBaseline as any[])[0] as any;
+                const dailyThreshold = baseline.avg_daily_spending + (baseline.stddev_daily_spending * dailyThresholdMultiplier);
+
+                // Detect daily spending anomalies
+                const [dailyAnomalies] = await connection.execute(`
+                    SELECT
+                        DATE(ph.purchase_date) as anomaly_date,
+                        SUM(ph.total_price) as daily_spending,
+                        COUNT(ph.id) as order_count,
+                        GROUP_CONCAT(CONCAT(ph.store_name, '(', ph.total_price, ')') SEPARATOR ', ') as orders
+                    FROM purchase_history ph
+                    WHERE ph.purchase_date >= ?
+                    GROUP BY DATE(ph.purchase_date)
+                    HAVING daily_spending > ?
+                    ORDER BY daily_spending DESC
+                `, [analysisStartDate, dailyThreshold]);
+
+                // Calculate category baselines
+                const [categoryBaselines] = await connection.execute(`
+                    SELECT
+                        psl.category,
+                        AVG(category_daily_spending) as avg_category_spending,
+                        STDDEV(category_daily_spending) as stddev_category_spending
+                    FROM (
+                        SELECT
+                            psl.category,
+                            DATE(ph.purchase_date) as purchase_day,
+                            SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as category_daily_spending
+                        FROM purchase_history ph
+                        JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                        WHERE ph.purchase_date >= DATE_SUB(?, INTERVAL 90 DAY)
+                        AND ph.purchase_date < ?
+                        GROUP BY psl.category, DATE(ph.purchase_date)
+                    ) category_daily_stats
+                    GROUP BY psl.category
+                `, [analysisStartDate, analysisStartDate]);
+
+                // Detect category spending anomalies
+                const categoryAnomalies: any[] = [];
+                for (const categoryBaseline of categoryBaselines as any[]) {
+                    const categoryThreshold = categoryBaseline.avg_category_spending +
+                        (categoryBaseline.stddev_category_spending * categoryThresholdMultiplier);
+
+                    const [categoryAnomaly] = await connection.execute(`
+                        SELECT
+                            psl.category,
+                            DATE(ph.purchase_date) as anomaly_date,
+                            SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as category_spending,
+                            COUNT(DISTINCT psl.item_name) as item_count,
+                            GROUP_CONCAT(DISTINCT psl.item_name SEPARATOR ', ') as items
+                        FROM purchase_history ph
+                        JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                        WHERE ph.purchase_date >= ?
+                        AND psl.category = ?
+                        GROUP BY psl.category, DATE(ph.purchase_date)
+                        HAVING category_spending > ?
+                        ORDER BY category_spending DESC
+                    `, [analysisStartDate, categoryBaseline.category, categoryThreshold]);
+
+                    if ((categoryAnomaly as any[]).length > 0) {
+                        categoryAnomalies.push(...(categoryAnomaly as any[]));
+                    }
+                }
+
+                // Detect unusual high-value items
+                const [unusualItems] = await connection.execute(`
+                    SELECT
+                        psl.item_name,
+                        psl.category,
+                        psl.unit_price,
+                        psl.purchase_quantity,
+                        (psl.unit_price * psl.purchase_quantity) as total_item_cost,
+                        ph.store_name,
+                        ph.purchase_date
+                    FROM purchase_history ph
+                    JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ?
+                    AND (psl.unit_price > ? OR (psl.unit_price * psl.purchase_quantity) > ?)
+                    ORDER BY total_item_cost DESC
+                `, [analysisStartDate, unusualItemThreshold, unusualItemThreshold]);
+
+                // Detect frequency anomalies (unusual purchase patterns)
+                const [frequencyAnomalies] = await connection.execute(`
+                    SELECT
+                        psl.item_name,
+                        psl.category,
+                        COUNT(*) as recent_purchases,
+                        SUM(psl.purchase_quantity) as total_quantity,
+                        AVG(psl.unit_price) as avg_price,
+                        MIN(ph.purchase_date) as first_purchase,
+                        MAX(ph.purchase_date) as last_purchase,
+                        DATEDIFF(MAX(ph.purchase_date), MIN(ph.purchase_date)) as purchase_span_days
+                    FROM purchase_history ph
+                    JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ?
+                    GROUP BY psl.item_name, psl.category
+                    HAVING recent_purchases >= 5 AND purchase_span_days <= 7
+                    ORDER BY recent_purchases DESC, total_quantity DESC
+                `, [analysisStartDate]);
+
+                return {
+                    analysisParameters: {
+                        analysisDepthDays,
+                        dailyThresholdMultiplier,
+                        categoryThresholdMultiplier,
+                        unusualItemThreshold
+                    },
+                    baseline: {
+                        avgDailySpending: baseline.avg_daily_spending,
+                        dailyThreshold
+                    },
+                    anomalies: {
+                        dailySpending: dailyAnomalies,
+                        categorySpending: categoryAnomalies,
+                        unusualItems: unusualItems,
+                        frequencyAnomalies: frequencyAnomalies
+                    },
+                    summary: {
+                        totalAnomalies: (dailyAnomalies as any[]).length + categoryAnomalies.length +
+                            (unusualItems as any[]).length + (frequencyAnomalies as any[]).length,
+                        riskLevel: calculateRiskLevel(dailyAnomalies as any[], categoryAnomalies, unusualItems as any[], frequencyAnomalies as any[])
+                    }
+                };
+            });
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data
+            });
+
+        } catch (error) {
+            logger.error('Failed to detect anomalous spending', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const getBudgetStatusTool = new DynamicTool({
+    name: 'get_budget_status',
+    description: '获取预算执行状况。输入: {"budgetLimits": {"类别": 预算金额}, "period": "预算期间(month/quarter)", "startDate": "开始日期", "endDate": "结束日期"}',
+    func: async (input: string) => {
+        try {
+            const {
+                budgetLimits,
+                period = 'month',
+                startDate,
+                endDate
+            } = JSON.parse(input);
+
+            if (!budgetLimits || typeof budgetLimits !== 'object') {
+                return JSON.stringify({
+                    success: false,
+                    error: '预算限制必须是对象格式'
+                });
+            }
+
+            const result = await databaseService.transaction(async (connection) => {
+                // Calculate period dates
+                let periodStartDate: string;
+                let periodEndDate: string;
+
+                if (startDate && endDate) {
+                    periodStartDate = startDate;
+                    periodEndDate = endDate;
+                } else {
+                    const now = new Date();
+                    if (period === 'quarter') {
+                        const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+                        periodStartDate = quarterStart.toISOString().split('T')[0];
+                        periodEndDate = new Date(quarterStart.getFullYear(), quarterStart.getMonth() + 3, 0).toISOString().split('T')[0];
+                    } else {
+                        periodStartDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+                        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        periodEndDate = monthEnd.toISOString().split('T')[0];
+                    }
+                }
+
+                // Get actual spending by category
+                const [actualSpending] = await connection.execute(`
+                    SELECT
+                        COALESCE(psl.category, '其他') as category,
+                        SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as actual_spending,
+                        COUNT(DISTINCT ph.id) as order_count,
+                        COUNT(DISTINCT psl.item_name) as item_count,
+                        AVG(psl.unit_price) as avg_item_price
+                    FROM purchase_history ph
+                    JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    GROUP BY COALESCE(psl.category, '其他')
+                `, [periodStartDate, periodEndDate]);
+
+                // Calculate budget status for each category
+                const budgetStatus: any[] = [];
+                const spendingMap = new Map();
+
+                (actualSpending as any[]).forEach(spending => {
+                    spendingMap.set(spending.category, spending);
+                });
+
+                for (const [category, budgetLimit] of Object.entries(budgetLimits)) {
+                    const spending = spendingMap.get(category) || {
+                        actual_spending: 0,
+                        order_count: 0,
+                        item_count: 0,
+                        avg_item_price: 0
+                    };
+
+                    const utilizationRate = spending.actual_spending / (budgetLimit as number);
+                    const remainingBudget = (budgetLimit as number) - spending.actual_spending;
+
+                    budgetStatus.push({
+                        category,
+                        budgetLimit: budgetLimit,
+                        actualSpending: spending.actual_spending,
+                        remainingBudget,
+                        utilizationRate,
+                        status: utilizationRate > 1 ? 'exceeded' :
+                            utilizationRate > 0.9 ? 'warning' :
+                                utilizationRate > 0.7 ? 'caution' : 'normal',
+                        orderCount: spending.order_count,
+                        itemCount: spending.item_count,
+                        avgItemPrice: spending.avg_item_price
+                    });
+                }
+
+                // Calculate overall budget metrics
+                const totalBudget = Object.values(budgetLimits).reduce((sum: number, limit) => sum + (limit as number), 0);
+                const totalSpending = budgetStatus.reduce((sum, status) => sum + status.actualSpending, 0);
+                const overallUtilization = totalSpending / totalBudget;
+
+                // Get spending trend for the period
+                const [spendingTrend] = await connection.execute(`
+                    SELECT
+                        DATE(ph.purchase_date) as spending_date,
+                        SUM(ph.total_price) as daily_spending
+                    FROM purchase_history ph
+                    WHERE ph.purchase_date >= ? AND ph.purchase_date <= ?
+                    GROUP BY DATE(ph.purchase_date)
+                    ORDER BY spending_date
+                `, [periodStartDate, periodEndDate]);
+
+                return {
+                    period: {
+                        type: period,
+                        startDate: periodStartDate,
+                        endDate: periodEndDate
+                    },
+                    overall: {
+                        totalBudget,
+                        totalSpending,
+                        remainingBudget: totalBudget - totalSpending,
+                        utilizationRate: overallUtilization,
+                        status: overallUtilization > 1 ? 'exceeded' :
+                            overallUtilization > 0.9 ? 'warning' :
+                                overallUtilization > 0.7 ? 'caution' : 'normal'
+                    },
+                    categoryStatus: budgetStatus.sort((a, b) => b.utilizationRate - a.utilizationRate),
+                    spendingTrend: spendingTrend,
+                    alerts: budgetStatus.filter(status => status.status === 'exceeded' || status.status === 'warning')
+                };
+            });
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data
+            });
+
+        } catch (error) {
+            logger.error('Failed to get budget status', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+export const analyzeSpendingTrendsTool = new DynamicTool({
+    name: 'analyze_spending_trends',
+    description: '分析支出趋势。输入: {"timeRange": 时间范围天数, "granularity": "粒度(daily/weekly/monthly)", "categories": ["分类筛选"], "includeForecasting": 是否包含预测}',
+    func: async (input: string) => {
+        try {
+            const {
+                timeRange = 90,
+                granularity = 'weekly',
+                categories,
+                includeForecasting = true
+            } = JSON.parse(input);
+
+            const result = await databaseService.transaction(async (connection) => {
+                const analysisStartDate = new Date();
+                analysisStartDate.setDate(analysisStartDate.getDate() - timeRange);
+
+                // Build date grouping based on granularity
+                let dateFormat: string;
+                let dateGroupBy: string;
+
+                switch (granularity) {
+                    case 'daily':
+                        dateFormat = '%Y-%m-%d';
+                        dateGroupBy = 'DATE(ph.purchase_date)';
+                        break;
+                    case 'monthly':
+                        dateFormat = '%Y-%m';
+                        dateGroupBy = 'DATE_FORMAT(ph.purchase_date, "%Y-%m")';
+                        break;
+                    case 'weekly':
+                    default:
+                        dateFormat = '%Y-%u';
+                        dateGroupBy = 'YEARWEEK(ph.purchase_date)';
+                        break;
+                }
+
+                // Build category filter
+                let categoryFilter = '';
+                const params: any[] = [analysisStartDate];
+
+                if (categories && categories.length > 0) {
+                    categoryFilter = 'AND psl.category IN (' + categories.map(() => '?').join(',') + ')';
+                    params.push(...categories);
+                }
+
+                // Get spending trends
+                const [spendingTrends] = await connection.execute(`
+                    SELECT
+                        ${dateGroupBy} as period,
+                        DATE_FORMAT(ph.purchase_date, '${dateFormat}') as period_label,
+                        SUM(ph.total_price) as total_spending,
+                        COUNT(ph.id) as order_count,
+                        AVG(ph.total_price) as avg_order_value,
+                        SUM(ph.delivery_cost) as total_delivery,
+                        COUNT(DISTINCT psl.category) as category_diversity
+                    FROM purchase_history ph
+                    LEFT JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                    WHERE ph.purchase_date >= ?
+                    ${categoryFilter}
+                    GROUP BY ${dateGroupBy}, DATE_FORMAT(ph.purchase_date, '${dateFormat}')
+                    ORDER BY period
+                `, params);
+
+                // Calculate trend statistics
+                const trends = spendingTrends as any[];
+                const spendingValues = trends.map(t => t.total_spending);
+
+                const trendStats = {
+                    totalPeriods: trends.length,
+                    avgSpending: spendingValues.reduce((sum, val) => sum + val, 0) / spendingValues.length,
+                    maxSpending: Math.max(...spendingValues),
+                    minSpending: Math.min(...spendingValues),
+                    spendingVariance: calculateVariance(spendingValues),
+                    trendDirection: calculateTrendDirection(spendingValues)
+                };
+
+                // Get category trends if no specific categories were requested
+                let categoryTrends: any[] = [];
+                if (!categories || categories.length === 0) {
+                    const [categoryTrendData] = await connection.execute(`
+                        SELECT
+                            psl.category,
+                            ${dateGroupBy} as period,
+                            SUM(psl.purchase_quantity * COALESCE(psl.unit_price, 0)) as category_spending,
+                            COUNT(DISTINCT psl.item_name) as item_diversity
+                        FROM purchase_history ph
+                        JOIN purchase_sub_list psl ON ph.id = psl.parent_id
+                        WHERE ph.purchase_date >= ?
+                        GROUP BY psl.category, ${dateGroupBy}
+                        ORDER BY psl.category, period
+                    `, [analysisStartDate]);
+
+                    // Group by category
+                    const categoryMap = new Map();
+                    (categoryTrendData as any[]).forEach(item => {
+                        if (!categoryMap.has(item.category)) {
+                            categoryMap.set(item.category, []);
+                        }
+                        categoryMap.get(item.category).push(item);
+                    });
+
+                    categoryTrends = Array.from(categoryMap.entries()).map(([category, data]) => ({
+                        category,
+                        trends: data,
+                        totalSpending: (data as any[]).reduce((sum, item) => sum + item.category_spending, 0),
+                        avgSpending: (data as any[]).reduce((sum, item) => sum + item.category_spending, 0) / (data as any[]).length,
+                        trendDirection: calculateTrendDirection((data as any[]).map(item => item.category_spending))
+                    }));
+                }
+
+                // Simple forecasting if requested
+                let forecast = null;
+                if (includeForecasting && trends.length >= 3) {
+                    forecast = generateSimpleForecast(spendingValues, granularity);
+                }
+
+                return {
+                    analysisParameters: {
+                        timeRange,
+                        granularity,
+                        categories: categories || 'all',
+                        includeForecasting
+                    },
+                    trends: trends,
+                    statistics: trendStats,
+                    categoryTrends: categoryTrends,
+                    forecast: forecast,
+                    insights: generateTrendInsights(trends, trendStats, categoryTrends)
+                };
+            });
+
+            if (!result.success) {
+                return JSON.stringify({
+                    success: false,
+                    error: result.error
+                });
+            }
+
+            return JSON.stringify({
+                success: true,
+                data: result.data
+            });
+
+        } catch (error) {
+            logger.error('Failed to analyze spending trends', { error });
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+});
+
+// Helper functions for financial analysis
+
+function calculateRiskLevel(dailyAnomalies: any[], categoryAnomalies: any[], unusualItems: any[], frequencyAnomalies: any[]): string {
+    const totalAnomalies = dailyAnomalies.length + categoryAnomalies.length + unusualItems.length + frequencyAnomalies.length;
+
+    if (totalAnomalies >= 10) return 'high';
+    if (totalAnomalies >= 5) return 'medium';
+    if (totalAnomalies >= 1) return 'low';
+    return 'normal';
+}
+
+function calculateVariance(values: number[]): number {
+    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+    const squaredDiffs = values.map(val => Math.pow(val - mean, 2));
+    return squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+}
+
+function calculateTrendDirection(values: number[]): string {
+    if (values.length < 2) return 'stable';
+
+    const firstHalf = values.slice(0, Math.floor(values.length / 2));
+    const secondHalf = values.slice(Math.floor(values.length / 2));
+
+    const firstAvg = firstHalf.reduce((sum, val) => sum + val, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((sum, val) => sum + val, 0) / secondHalf.length;
+
+    const changePercent = ((secondAvg - firstAvg) / firstAvg) * 100;
+
+    if (changePercent > 10) return 'increasing';
+    if (changePercent < -10) return 'decreasing';
+    return 'stable';
+}
+
+function generateSimpleForecast(values: number[], granularity: string): any {
+    // Simple linear regression for forecasting
+    const n = values.length;
+    const x = Array.from({ length: n }, (_, i) => i + 1);
+    const y = values;
+
+    const sumX = x.reduce((sum, val) => sum + val, 0);
+    const sumY = y.reduce((sum, val) => sum + val, 0);
+    const sumXY = x.reduce((sum, val, i) => sum + val * y[i], 0);
+    const sumXX = x.reduce((sum, val) => sum + val * val, 0);
+
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+
+    // Forecast next 3 periods
+    const forecastPeriods = 3;
+    const forecasts = [];
+
+    for (let i = 1; i <= forecastPeriods; i++) {
+        const nextX = n + i;
+        const forecastValue = slope * nextX + intercept;
+        forecasts.push({
+            period: nextX,
+            forecastValue: Math.max(0, forecastValue), // Ensure non-negative
+            confidence: Math.max(0.3, 1 - (i * 0.2)) // Decreasing confidence
+        });
+    }
+
+    return {
+        method: 'linear_regression',
+        slope,
+        intercept,
+        forecasts,
+        granularity
+    };
+}
+
+function generateTrendInsights(trends: any[], stats: any, categoryTrends: any[]): string[] {
+    const insights: string[] = [];
+
+    // Spending level insights
+    if (stats.trendDirection === 'increasing') {
+        insights.push('支出呈上升趋势，建议关注预算控制');
+    } else if (stats.trendDirection === 'decreasing') {
+        insights.push('支出呈下降趋势，财务状况良好');
+    } else {
+        insights.push('支出相对稳定，保持良好的消费习惯');
+    }
+
+    // Variability insights
+    const coefficientOfVariation = Math.sqrt(stats.spendingVariance) / stats.avgSpending;
+    if (coefficientOfVariation > 0.5) {
+        insights.push('支出波动较大，建议制定更稳定的消费计划');
+    } else if (coefficientOfVariation < 0.2) {
+        insights.push('支出模式稳定，消费习惯良好');
+    }
+
+    // Category insights
+    if (categoryTrends.length > 0) {
+        const increasingCategories = categoryTrends.filter(ct => ct.trendDirection === 'increasing');
+        if (increasingCategories.length > 0) {
+            insights.push(`以下类别支出增长较快：${increasingCategories.map(ct => ct.category).join('、')}`);
+        }
+    }
+
+    return insights;
+}
+
+export function createFinancialAnalysisTools(): DynamicTool[] {
     return [
-        getSpendingAnalysisTool
+        getSpendingAnalysisTool,
+        generateFinancialReportTool,
+        detectAnomalousSpendingTool,
+        getBudgetStatusTool,
+        analyzeSpendingTrendsTool
     ];
+}
+
+export function createFinancialTools(): DynamicTool[] {
+    return createFinancialAnalysisTools();
 }
 
 // User feedback learning tools
