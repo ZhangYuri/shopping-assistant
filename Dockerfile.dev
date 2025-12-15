@@ -1,0 +1,37 @@
+# Development Dockerfile with hot reload
+FROM node:18-alpine
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create app user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nodejs -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm ci
+
+# Copy OCR training data
+COPY *.traineddata ./
+
+# Create necessary directories
+RUN mkdir -p storage/files uploads logs && \
+    chown -R nodejs:nodejs storage uploads logs
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port and debug port
+EXPOSE 3000 9229
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application in development mode with debugging
+CMD ["npm", "run", "dev"]
