@@ -4,6 +4,7 @@
 
 import 'dotenv/config';
 import { Logger } from './utils/Logger';
+import { ShoppingAssistantServer } from './api/server';
 
 // Initialize main logger
 const logger = new Logger({
@@ -16,6 +17,7 @@ const logger = new Logger({
  */
 export class ShoppingAssistantSystem {
     private logger: Logger;
+    private server: ShoppingAssistantServer;
     private isInitialized = false;
     private isRunning = false;
 
@@ -23,6 +25,19 @@ export class ShoppingAssistantSystem {
         this.logger = new Logger({
             component: 'ShoppingAssistantSystem',
             level: (process.env.LOG_LEVEL as any) || 'info',
+        });
+
+        // Initialize server with configuration from environment
+        this.server = new ShoppingAssistantServer({
+            port: parseInt(process.env.PORT || '3000'),
+            host: process.env.HOST || '0.0.0.0',
+            enableAuth: process.env.ENABLE_AUTH === 'true',
+            enableCors: process.env.ENABLE_CORS !== 'false',
+            maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760'),
+            uploadDir: process.env.UPLOAD_DIR || './uploads',
+            enableRateLimit: process.env.ENABLE_RATE_LIMIT === 'true',
+            enableLogging: process.env.ENABLE_LOGGING !== 'false',
+            logLevel: (process.env.LOG_LEVEL as any) || 'info',
         });
     }
 
@@ -34,11 +49,8 @@ export class ShoppingAssistantSystem {
         try {
             this.logger.info('Initializing Shopping Assistant System...');
 
-            // TODO: Initialize components in subsequent tasks:
-            // - MCP servers (database, file-storage, cache, notification)
-            // - Agents (inventory, procurement, finance, notification)
-            // - LangGraph workflow engine
-            // - Natural language interface
+            // Initialize server (this will initialize all components)
+            await this.server.initialize();
 
             this.isInitialized = true;
             this.logger.info('Shopping Assistant System initialized successfully');
@@ -62,7 +74,8 @@ export class ShoppingAssistantSystem {
         try {
             this.logger.info('Starting Shopping Assistant System...');
 
-            // TODO: Start all components in subsequent tasks
+            // Start the server
+            await this.server.start();
 
             this.isRunning = true;
             this.logger.info('Shopping Assistant System started successfully');
@@ -82,7 +95,8 @@ export class ShoppingAssistantSystem {
         try {
             this.logger.info('Stopping Shopping Assistant System...');
 
-            // TODO: Stop all components gracefully
+            // Stop the server
+            await this.server.shutdown();
 
             this.isRunning = false;
             this.logger.info('Shopping Assistant System stopped successfully');
@@ -99,6 +113,10 @@ export class ShoppingAssistantSystem {
             initialized: this.isInitialized,
             running: this.isRunning,
         };
+    }
+
+    getServer(): ShoppingAssistantServer {
+        return this.server;
     }
 }
 
